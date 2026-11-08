@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ehunter"
+version = "1.0.0"
+description = "Domain -> employee names, titles and email addresses (OSINT aggregation + email pattern inference)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+dns = ["dnspython>=2.4"]
+
+[project.scripts]
+ehunter = "ehunter.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ehunter*"]

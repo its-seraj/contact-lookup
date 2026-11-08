@@ -1,0 +1,12 @@
+out/
+.env
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+_probe*.py
+_patch*.py
+_known.txt
+.venv/
+tests/_tmp_sweep/
