@@ -93,6 +93,7 @@ minutes to avoid a repeated 3-second probe).
 | `UserWarning: The parameters have been moved from the Blocks constructor to the launch() method in Gradio 6.0: theme` | Gradio 6 moved `theme` | handled in `app.py` (version-aware) |
 | `Running on local URL: http://0.0.0.0:7860, with SSR` then `Stopping Node.js server...` | Gradio 6 starts an **SSR Node proxy** on 7860 and moves Python to 7861. `Stopping Node.js server...` is a SIGTERM handler, i.e. the container was asked to stop after that proxy failed a health check | `ssr_mode=False` in `launch()` (already set) so Python serves 7860 directly |
 | `Invalid allowed path` | `allowed_paths` pointed at a directory that does not exist — `out/` is gitignored, so a fresh Space has none | `app.py` creates `out/` before launching |
+| `No @spaces.GPU function detected during startup` | the Space's hardware is set to a **GPU** flavour, and Hugging Face requires a `@spaces.GPU` function before it will run one. This tool is network-bound, not compute-bound: GPU buys nothing | Space → Settings → *Space hardware* → **CPU basic (free)** → *Factory reboot*. `suggested_hardware: cpu-basic` is declared in the README front matter |
 | Space builds, then restarts in a loop | usually a launch exception; `app.py` now prints the traceback and retries with plain `launch()` | read the first traceback in the log |
 
 `GRADIO_SERVER_PORT` (set by Spaces) is preferred over `PORT`, falling back to 7860.
