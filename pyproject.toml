@@ -13,6 +13,8 @@ dependencies = []
 
 [project.optional-dependencies]
 dns = ["dnspython>=2.4"]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "pymongo>=4.6"]
+space = ["gradio>=5.0"]
 
 [project.scripts]
 ehunter = "ehunter.cli:main"

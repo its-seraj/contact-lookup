@@ -1,0 +1,4 @@
+# Only needed to serve the HTTP API / server.py (the CLI and the Gradio Space do not).
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pymongo>=4.6

@@ -10,3 +10,6 @@ _patch*.py
 _known.txt
 .venv/
 tests/_tmp_sweep/
+.deps/
+_stub/
+.tmp/

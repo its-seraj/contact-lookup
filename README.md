@@ -417,6 +417,8 @@ bamboobox.ai,,,,,,name_only,30,,,,harsh-b2,,github,"github: @harsh-b2; no displa
 | `--linkedin-lookups` | 10 | per-person LinkedIn searches; `0` disables |
 | `--linkedin` | off | sweep LinkedIn dorks and add every profile to the same list (`--linkedin-sweep` also works) |
 | `--linkedin-file` | – | reuse a saved sweep (`linkedin_latest.csv/json`) as contacts; no credits |
+| `MONGODB_URI` | – | enables the API's per-domain cache |
+| `CORS_ORIGINS` | `*` | allowed origins for the HTTP API |
 | `--sweep-depth` | 3 | result pages per sweep query |
 | `--sweep-variants` | 14 | LinkedIn query variants to run |
 | `--permute` | off | walk the candidate ladder for people without a verified address (implies `--verify`) |
@@ -472,6 +474,120 @@ charset decoding, testimonial detection, the Gravatar channel, and the LinkedIn 
 (variant building, employment classification, record construction).
 
 ---
+
+## HTTP API: multi-domain, streamed, MongoDB-cached
+
+The same engine is exposed as a JSON API for a web front end.
+
+```bash
+pip install -r requirements-api.txt          # fastapi, uvicorn, pymongo
+set MONGODB_URI=mongodb://localhost:27017    # optional: cache is skipped without it
+python -m server                             # API on :8000, Gradio UI on /ui
+```
+
+| Method | Route | Purpose |
+|---|---|---|
+| `POST` | `/api/scan` | scan 1–10 domains, streamed as newline-delimited JSON (or `?format=sse`) |
+| `GET` | `/api/domains` | cached domains, newest first (no rows) |
+| `GET` | `/api/domains/{domain}` | full cached document including rows |
+| `DELETE` | `/api/domains/{domain}` | drop one cached domain |
+| `GET` | `/api/health` | cache status, port-25 state, domain limit |
+
+### Request
+
+```json
+{ "domains": ["acme.com", "beta.io"], "isVerify": false, "isLinkedin": true, "force": false }
+```
+
+`domains` also accepts a single string (`"acme.com, beta.io"`). `isVerify` maps to
+`--permute` + SMTP verification, `isLinkedin` maps to `--linkedin`. `force` ignores the
+cached document.
+
+### Events on the stream
+
+| type | when | payload |
+|---|---|---|
+| `start` | before a domain is scanned | `domain` |
+| `log` | every pipeline log line, as it happens | `domain`, `message` |
+| `cached` | domain served from MongoDB | `domain`, `flags`, `counts`, `scanned_at` |
+| `result` | domain finished (or cache hit) | `domain`, `rows`, `meta`, `counts`, `cached` |
+| `error` | invalid input, or a domain that failed | `domain` or `input`, `message` |
+| `done` | all domains handled | `domains`, `elapsed_ms` |
+
+```bash
+curl -N -X POST http://localhost:8000/api/scan \
+  -H "Content-Type: application/json" \
+  -d '{"domains":["buffer.com","posthog.com"],"isLinkedin":true}'
+```
+
+```
+{"type":"start","domain":"buffer.com"}
+{"type":"log","domain":"buffer.com","message":"  [*] discovering..."}
+{"type":"result","domain":"buffer.com","rows":[...],"counts":{"people":17,...},"cached":false}
+{"type":"start","domain":"posthog.com"}
+{"type":"result","domain":"posthog.com","rows":[...]}
+{"type":"done","domains":2,"elapsed_ms":72200}
+```
+
+Browser side, read it as a stream:
+
+```js
+const res = await fetch("/api/scan", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ domains, isVerify, isLinkedin }),
+});
+const reader = res.body.getReader();
+const decoder = new TextDecoder();
+let buffer = "";
+for (;;) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  buffer += decoder.decode(value, { stream: true });
+  let i;
+  while ((i = buffer.indexOf("\n")) >= 0) {
+    const line = buffer.slice(0, i).trim();
+    buffer = buffer.slice(i + 1);
+    if (line) handleEvent(JSON.parse(line));   // start / log / result / error / done
+  }
+}
+```
+
+`?format=sse` emits `data: {...}\n\n` frames instead (note `EventSource` cannot POST; use
+`fetch` or an SSE library).
+
+### Cache semantics
+
+One MongoDB document per domain (`_id` = domain), collection `domains`:
+
+```json
+{ "_id": "buffer.com", "domain": "buffer.com", "rows": [...], "meta": {...},
+  "counts": {"people": 17, "with_email": 9}, "flags": {"isVerify": false, "isLinkedin": true},
+  "scanned_at": "2026-11-08T15:41:00+00:00", "scan_ms": 22517 }
+```
+
+A cached document is reused when the flags that produced it **cover** the request: a
+`isLinkedin=false` document cannot answer an `isLinkedin=true` request, so that domain is
+rescanned instead of returning a thinner list; `force: true` always rescans. Set
+`DOMAINS_PER_REQUEST` (default 10) and `CORS_ORIGINS` (default `*`, comma separated) as
+needed. Without `pymongo` or a reachable server the cache silently degrades to "no cache" —
+`/api/health` reports why.
+
+## Deploy on Hugging Face
+
+The repository doubles as a Gradio Space: `app.py` + `requirements.txt` + the YAML front
+matter are already in place, so pushing it to a Space is enough.
+
+```bash
+git clone https://huggingface.co/spaces/<user>/ehunter
+cp -r ./* .                      # app.py, ehunter/, requirements.txt, README.md
+git add -A && git commit -m "ehunter space" && git push
+```
+
+Add `SERPER_API_KEY` and `GITHUB_TOKEN` in the Space's *Variables and secrets*, keep the
+Space **private** (results are personal data), and note the hard limit: **port 25 is blocked
+on Hugging Face, so SMTP verification cannot run there** — discovery works, addresses come
+back as unverified guesses. Full checklist, limits and workarounds: [DEPLOY_HF.md](DEPLOY_HF.md).
 
 ## Use it on data you are allowed to touch
 

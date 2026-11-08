@@ -156,6 +156,10 @@ class Search(Source):
         text = f"{item.get('title', '')} {item.get('snippet', '')}".lower()
         return domain in text or domain in link or "linkedin.com/in/" in link
 
+    # Only these can be "blocked": a keyed API answering with zero results for a query
+    # is a legitimate no-match, not a dead engine.
+    KEYLESS_PROVIDERS = {"duckduckgo", "bing"}
+
     def _note_miss(self, ctx, provider_name: str, ok: bool) -> None:
         """Two empty/failed answers in a row mean the engine is blocked - stop asking."""
         misses = dict(ctx.memo("provider_misses") or {})
@@ -188,7 +192,8 @@ class Search(Source):
                     ctx.debug(f"search[{provider_name}]: {type(exc).__name__}: {exc}")
                     break
                 fresh = [item for item in items if (item.get("link") or "") not in seen]
-                self._note_miss(ctx, provider_name, bool(fresh))
+                if provider_name in self.KEYLESS_PROVIDERS:
+                    self._note_miss(ctx, provider_name, bool(fresh))
                 if not fresh:
                     break
                 for item in fresh:

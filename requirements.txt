@@ -1,3 +1,3 @@
-# Core runs on the Python standard library only (3.9+). Nothing to install.
-# Optional: better/faster MX resolution when the DoH resolver is blocked.
-# dnspython>=2.4
+# The CLI is standard library only. Gradio is supplied by the Space runtime from the
+# `sdk_version` in README.md - do not pin it here, or the build installs a version that
+# disagrees with the Space SDK (e.g. sdk_version 6.31.0 vs gradio<6).
