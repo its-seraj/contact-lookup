@@ -1,0 +1,2 @@
+[server] UI disabled (ModuleNotFoundError: No module named 'gradio')
+INFO:     127.0.0.1:55306 - "POST /api/scan HTTP/1.1" 200 OK

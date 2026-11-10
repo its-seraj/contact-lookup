@@ -23,6 +23,9 @@ class ScanFlags:
 
     is_verify: bool = False
     is_linkedin: bool = True
+    permute_max: int = 19
+    max_pages: int = 8
+    sweep_variants: int = 10
 
     def as_dict(self) -> dict:
         return {"isVerify": self.is_verify, "isLinkedin": self.is_linkedin}
@@ -80,26 +83,40 @@ def cache_covers(cached, flags: ScanFlags) -> bool:
 
 
 def build_doc(domain: str, result: dict, flags: ScanFlags, scan_ms: "int | None" = None) -> dict:
-    """The document stored in MongoDB / returned in a `result` event."""
+    """The document stored in MongoDB / returned in a `result` event.
+
+    `flags` records what actually ran, not what was asked for: a verify request that was
+    silently downgraded (port 25 blocked) must not be cached as a verified scan, or later
+    requests would be served the email-less result instead of triggering a rescan.
+    """
+    effective = ScanFlags(
+        is_verify=flags.is_verify and bool(result.get("verify_ran", True)),
+        is_linkedin=flags.is_linkedin,
+    )
     return {
         "domain": domain,
         "rows": result.get("rows") or [],
         "meta": result.get("meta") or {},
         "counts": result.get("counts") or {},
-        "flags": flags.as_dict(),
+        "warnings": list(result.get("warnings") or []),
+        "flags": effective.as_dict(),
         "scanned_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "scan_ms": int(scan_ms if scan_ms is not None else result.get("scan_ms") or 0),
     }
 
 
-def run_domain(domain: str, flags: ScanFlags, log=None) -> dict:
+def run_domain(domain: str, flags: ScanFlags, log=None, progress=None) -> dict:
     """Blocking scan for one domain (called from a worker thread)."""
     started = time.time()
     result = run_scan(
         domain,
         linkedin=flags.is_linkedin,
         verify=flags.is_verify,
+        permute_max=flags.permute_max,
+        max_pages=flags.max_pages,
+        sweep_variants=flags.sweep_variants,
         log=log,
+        progress=progress,
     )
     result["scan_ms"] = int((time.time() - started) * 1000)
     return result

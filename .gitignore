@@ -13,3 +13,4 @@ tests/_tmp_sweep/
 .deps/
 _stub/
 .tmp/
+vendor/

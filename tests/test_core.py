@@ -15,7 +15,8 @@ from ehunter.names import (
     split_name_title,
     strip_accents,
 )
-from ehunter.pipeline import generate_emails, infer_pattern, merge_records
+from ehunter.pipeline import (dedupe_records, generate_emails, infer_pattern,
+                              merge_records)
 from ehunter.sources.base import rec
 from ehunter.sources.pgp import parse_mr_keys, unescape_mr
 from ehunter.sources.web import is_generic, parse_html
@@ -309,6 +310,32 @@ class ExternalTitleTests(unittest.TestCase):
         self.assertFalse(is_external_title("CMO at Bamboobox", "bamboobox.ai"))
         self.assertFalse(is_external_title("Chief Technology Officer", "bamboobox.ai"))
         self.assertFalse(is_external_title("Head of Sales - EMEA", "bamboobox.ai"))
+
+
+class DedupeTests(unittest.TestCase):
+    def test_identical_rows_collapse(self):
+        ctx = FakeCtx()
+        rows = [
+            rec(ctx, "web", full="Jane Doe", email="jane@acme.com"),
+            rec(ctx, "github", full="Jane Doe", email="jane@acme.com"),
+        ]
+        self.assertEqual(len(dedupe_records(rows)), 1)
+
+    def test_same_person_different_addresses_survive(self):
+        ctx = FakeCtx()
+        rows = [
+            rec(ctx, "web", full="Jane Doe", email="jane@acme.com"),
+            rec(ctx, "web", full="Jane Doe", email="j.doe@acme.com"),
+        ]
+        self.assertEqual(len(dedupe_records(rows)), 2)
+
+    def test_different_people_survive(self):
+        ctx = FakeCtx()
+        rows = [
+            rec(ctx, "web", full="Jane Doe", email="jane@acme.com"),
+            rec(ctx, "web", full="Mark Smith", email="jane@acme.com"),
+        ]
+        self.assertEqual(len(dedupe_records(rows)), 2)
 
 
 class PgpTests(unittest.TestCase):

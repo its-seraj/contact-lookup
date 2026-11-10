@@ -11,11 +11,24 @@ method degrades to "no cached data" instead of failing the request.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 
 from .config import env
 
 log = logging.getLogger("ehunter.store")
+
+# Accept the names people actually use, so an existing URL does not have to be renamed.
+MONGO_ENV_NAMES = ("MONGODB_URI", "MONGO_URI", "MONGODB_URL", "MONGO_URL", "DATABASE_URL")
+
+
+def find_uri() -> "tuple[str, str]":
+    """(uri, env var name) for the first mongodb:// or mongodb+srv:// value found."""
+    for name in MONGO_ENV_NAMES:
+        value = env(name)
+        if value and value.lower().startswith(("mongodb://", "mongodb+srv://")):
+            return value, name
+    return "", ""
 
 
 def _now() -> datetime:
@@ -27,14 +40,19 @@ class DomainStore:
 
     def __init__(self, uri: "str | None" = None, db_name: "str | None" = None,
                  collection: "str | None" = None):
-        self.uri = uri if uri is not None else (env("MONGODB_URI") or "")
+        if uri is None:
+            found, self.uri_from = find_uri()
+            self.uri = found
+        else:
+            self.uri, self.uri_from = uri, "argument"
         self.db_name = db_name or env("MONGODB_DB") or "ehunter"
         self.collection_name = collection or env("MONGODB_COLLECTION") or "domains"
         self._client = None
         self._col = None
         self._error = ""
         if not self.uri:
-            self._error = "MONGODB_URI not set"
+            self._error = ("no MongoDB URL found (set MONGODB_URI, MONGO_URI, "
+                           "MONGODB_URL or DATABASE_URL)")
 
     # ------------------------------------------------------------------
     @property
@@ -52,12 +70,13 @@ class DomainStore:
             self._error = "pymongo not installed"
             return None
         try:
-            self._client = MongoClient(self.uri, serverSelectionTimeoutMS=4000,
-                                       connectTimeoutMS=4000)
+            self._client = MongoClient(self.uri, serverSelectionTimeoutMS=6000,
+                                       connectTimeoutMS=6000)
             self._client.admin.command("ping")
             self._col = self._client[self.db_name][self.collection_name]
             self._col.create_index("domain", unique=True, sparse=True)
-            log.info("mongo cache ready: db=%s collection=%s", self.db_name, self.collection_name)
+            log.info("mongo cache ready: via %s, db=%s collection=%s",
+                     self.uri_from, self.db_name, self.collection_name)
         except Exception as exc:  # noqa: BLE001 - cache must never break the API
             self._error = f"{type(exc).__name__}: {exc}"
             log.warning("mongo cache unavailable: %s", self._error)
@@ -65,6 +84,14 @@ class DomainStore:
         return self._col
 
     # ------------------------------------------------------------------
+    def warm(self) -> dict:
+        """Connect now and report how long it took (used at server startup)."""
+        started = time.time()
+        collection = self._collection()
+        info = self.health()
+        info["ping_ms"] = int((time.time() - started) * 1000) if collection is not None else None
+        return info
+
     def get(self, domain: str) -> "dict | None":
         collection = self._collection()
         if collection is None:
@@ -118,6 +145,7 @@ class DomainStore:
         collection = self._collection()
         return {
             "enabled": collection is not None,
+            "from": self.uri_from,
             "db": self.db_name,
             "collection": self.collection_name,
             "error": self._error,

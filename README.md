@@ -280,6 +280,9 @@ Rules the resolver follows:
   `unknown`/`greylisted` → stop (the receiver refused us, not the mailbox), `invalid` → next.
 * **Never lose a person.** If the ladder exhausts and their discovered address was
   rejected, the row becomes `name_only` instead of being dropped.
+* **The ladder's answer is final.** A 4xx answer keeps the guess as `greylisted` and stops
+  that person; there is no waiting retry pass unless you ask for one with
+  `--greylist-retries N --greylist-wait SECONDS` (both default to off: 0 and 0).
 * Tune with `--permute-max N` (default 19).
 
 ### Names that are not names
@@ -327,7 +330,7 @@ Result mapping:
 |---|---|
 | `valid` | 250/251/252 (or 552 mailbox-full) and the domain is not catch-all |
 | `invalid` | hard 5xx that is about the *recipient* |
-| `greylisted` | 4xx / 421 → try later |
+| `greylisted` | 4xx / 421 → "try later"; the guessed address is kept but unconfirmed |
 | `catch_all` | domain accepts every address, so acceptance proves nothing |
 | `unknown` | no route, timeout, or the server rejected **us** |
 
@@ -367,6 +370,20 @@ Workspace domain every further `RCPT` returns
 `greylisted` verdict, not a rejection. Keep `--permute-max` modest and `--verify-delay`
 around 1s on Google-hosted domains, or re-check those addresses later with
 `ehunter verify`.
+
+**Port 25 blocked by your ISP/hotspot?** Test it: `python -c "import socket; socket.create_connection(('aspmx.l.google.com', 25), 5)"`. If that times out, route
+the probes through a host that allows port 25 (check it there with
+`nc -vz aspmx.l.google.com 25`; AWS, GCP, Azure and Oracle block it by default):
+
+```
+ssh -N -D 1080 user@your-vps        # leave running
+SMTP_PROXY=socks5://127.0.0.1:1080  # in .env
+```
+
+Only SMTP connections use the tunnel; web scraping, DNS and APIs stay direct. The MX
+hostname is resolved on the VPS. `GET /api/health` and the scan warning say whether the
+tunnel can reach port 25 (`/api/health` shows the result of the last check, so it reads
+`null` until the first verify scan).
 
 Other honest limits: providers that accept-then-bounce, tarpits that always answer 250,
 and per-connection rate limits all make a single probe unreliable. Treat `valid` as
@@ -424,6 +441,9 @@ bamboobox.ai,,,,,,name_only,30,,,,harsh-b2,,github,"github: @harsh-b2; no displa
 | `--sweep-variants` | 14 | LinkedIn query variants to run |
 | `--permute` | off | walk the candidate ladder for people without a verified address (implies `--verify`) |
 | `--permute-max` | 19 | candidate addresses per person |
+| `SMTP_PROXY` (env) | – | `socks5://host:port` - send SMTP probes through a SOCKS5 tunnel when your own network blocks port 25 (see below) |
+| `--control` | – | an address you know exists on the domain (or `VERIFY_CONTROL`); if the server refuses it, its "no such user" answers are treated as throttling (`greylisted`) instead of trusted |
+| `--greylist-wait` / `--greylist-retries` | 60s / 1 | re-probe `greylisted` addresses after a wait; `0` retries turns it off |
 | `--names-file` | – | CSV (`first_name,last_name[,title]`) or plain `First Last` lines |
 | `--delay` | 0.4s | per-host request spacing, shared by all sources |
 | `--threads` | 8 | source concurrency and SMTP workers |
@@ -511,6 +531,7 @@ cached document.
 | `start` | before a domain is scanned | `domain` |
 | `log` | every pipeline log line, as it happens | `domain`, `message` |
 | `cached` | domain served from MongoDB | `domain`, `flags`, `counts`, `scanned_at` |
+| `partial` | **rows found so far**, emitted per stage | `domain`, `stage`, `rows` (only new/changed), `removed`, `total`, `rows_total` |
 | `result` | domain finished (or cache hit) | `domain`, `rows`, `meta`, `counts`, `cached` |
 | `error` | invalid input, or a domain that failed | `domain` or `input`, `message` |
 | `done` | all domains handled | `domains`, `elapsed_ms` |
@@ -529,6 +550,30 @@ curl -N -X POST http://localhost:8000/api/scan \
 {"type":"result","domain":"posthog.com","rows":[...]}
 {"type":"done","domains":2,"elapsed_ms":72200}
 ```
+
+`partial.stage` is one of `discovered`, `generated`, `linkedin`, `verified`,
+`permuting:N` (one per ladder round), `resolved`. Rows are deltas: apply `rows` (they carry
+the same columns as the final result), delete the keys in `removed`, and you have the
+current table. A row's key is its person, not its address, so an email appearing in round 3
+updates that person's row instead of adding a duplicate:
+
+```python
+from ehunter.progress import row_key
+
+table = {}
+for event in stream:
+    if event["type"] != "partial":
+        continue
+    for row in event["rows"]:
+        table[row_key(row)] = row
+    for key in event["removed"]:
+        table.pop(key, None)
+    render(list(table.values()))        # <- the UI renders here, mid-scan
+```
+
+That is what keeps the page useful while verification runs: on a real domain the first 15
+rows appeared at 19 s, LinkedIn URLs at 43 s, and addresses arrived round by round after
+that, while the final result landed at 337 s.
 
 Browser side, read it as a stream:
 
@@ -549,7 +594,7 @@ for (;;) {
   while ((i = buffer.indexOf("\n")) >= 0) {
     const line = buffer.slice(0, i).trim();
     buffer = buffer.slice(i + 1);
-    if (line) handleEvent(JSON.parse(line));   // start / log / result / error / done
+    if (line) handleEvent(JSON.parse(line));   // start / log / partial / result / error / done
   }
 }
 ```
@@ -566,6 +611,9 @@ One MongoDB document per domain (`_id` = domain), collection `domains`:
   "counts": {"people": 17, "with_email": 9}, "flags": {"isVerify": false, "isLinkedin": true},
   "scanned_at": "2026-11-08T15:41:00+00:00", "scan_ms": 22517 }
 ```
+
+Measured on a real domain: the first request took **51.9 s**, the second identical one
+**0.04 s** (`{"type":"cached"}` then `{"type":"result"}`), a 1,400x difference.
 
 A cached document is reused when the flags that produced it **cover** the request: a
 `isLinkedin=false` document cannot answer an `isLinkedin=true` request, so that domain is

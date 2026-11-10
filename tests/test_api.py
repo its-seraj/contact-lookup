@@ -71,6 +71,31 @@ class BuildDocTests(unittest.TestCase):
         self.assertIn("scan_ms", doc)
 
 
+class DowngradedVerifyTests(unittest.TestCase):
+    """isVerify requested, but port 25 was blocked so verification never ran."""
+
+    RESULT = {"rows": [{"full_name": "Jane"}], "meta": {}, "counts": {"people": 1},
+              "verify_ran": False, "warnings": ["port 25 is blocked"]}
+
+    def test_doc_records_what_actually_ran(self):
+        doc = build_doc("acme.com", self.RESULT, ScanFlags(is_verify=True, is_linkedin=True))
+        self.assertEqual(doc["flags"], {"isVerify": False, "isLinkedin": True})
+        self.assertEqual(doc["warnings"], ["port 25 is blocked"])
+
+    def test_downgraded_doc_does_not_satisfy_a_later_verify_request(self):
+        doc = build_doc("acme.com", self.RESULT, ScanFlags(is_verify=True, is_linkedin=True))
+        self.assertFalse(cache_covers(doc, ScanFlags(is_verify=True, is_linkedin=True)))
+        self.assertTrue(cache_covers(doc, ScanFlags(is_verify=False, is_linkedin=True)))
+
+    def test_stream_emits_a_warning_event(self):
+        events = _collect(["acme.com"], ScanFlags(is_verify=True), FakeStore(doc=None),
+                          run_result=self.RESULT)
+        warning = next(e for e in events if e["type"] == "warning")
+        self.assertEqual(warning["message"], "port 25 is blocked")
+        result = next(e for e in events if e["type"] == "result")
+        self.assertEqual(result["warnings"], ["port 25 is blocked"])
+
+
 class FakeStore:
     def __init__(self, doc=None):
         self.doc = doc
@@ -88,7 +113,7 @@ def _collect(domain_list, flags, store, run_result=None, force=False):
     """Drive the streaming generator without a server."""
     events = []
 
-    def fake_run(domain, scan_flags, log=None):
+    def fake_run(domain, scan_flags, log=None, progress=None):
         if log:
             log("  [i] fake scan started")
         return run_result or {"rows": [{"full_name": "Jane Doe"}], "meta": {}, "counts": {"people": 1}}
@@ -149,6 +174,55 @@ class StreamTests(unittest.TestCase):
         self.assertEqual([r["domain"] for r in results], ["a.com", "b.io"])
         self.assertEqual(events[-1]["type"], "done")
         self.assertEqual(events[-1]["domains"], 2)
+
+
+class PermuteMaxTests(unittest.TestCase):
+    def test_defaults_are_nineteen_everywhere(self):
+        import inspect
+
+        from ehunter.service import ScanFlags
+        from ehunter.webapp import run_scan
+
+        self.assertEqual(ScanFlags().permute_max, 19)
+        self.assertEqual(
+            inspect.signature(run_scan).parameters["permute_max"].default, 19
+        )
+
+    def test_body_accepts_a_lower_value(self):
+        body = api.ScanBody(domains=["acme.com"], permuteMax=6)
+        self.assertEqual(body.permuteMax, 6)
+
+    def test_body_rejects_out_of_range(self):
+        with self.assertRaises(Exception):
+            api.ScanBody(domains=["acme.com"], permuteMax=99)
+
+
+class PartialStreamTests(unittest.TestCase):
+    def test_partial_rows_are_forwarded(self):
+        events = []
+
+        def fake_run(domain, flags, log=None, progress=None):
+            if progress:
+                progress({"stage": "discovered", "rows": [{"full_name": "Jane",
+                                                           "email": ""}],
+                          "removed": [], "total": 1})
+            return {"rows": [{"full_name": "Jane", "email": "jane@acme.com"}],
+                    "meta": {}, "counts": {"people": 1}}
+
+        with mock.patch.object(api, "store", return_value=FakeStore(doc=None)), \
+             mock.patch.object(api, "run_domain", side_effect=fake_run):
+            async def go():
+                async for event in api._stream(["acme.com"], ScanFlags(is_linkedin=False),
+                                               False, lambda e: e):
+                    events.append(event)
+            asyncio.run(go())
+
+        partials = [e for e in events if e["type"] == "partial"]
+        self.assertEqual(len(partials), 1)
+        self.assertEqual(partials[0]["stage"], "discovered")
+        self.assertEqual(partials[0]["domain"], "acme.com")
+        self.assertEqual(partials[0]["rows"][0]["full_name"], "Jane")
+        self.assertEqual(partials[0]["total"], 1)
 
 
 class RouteTests(unittest.TestCase):

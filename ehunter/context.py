@@ -21,6 +21,7 @@ class Options:
     linkedin_lookups: int = 10
     permute: bool = False
     permute_max: int = 19
+    permute_all: bool = False
     linkedin_sweep: bool = False
     linkedin_file: str = ""
     sweep_depth: int = 3
@@ -36,6 +37,12 @@ class Options:
     verify_delay: float = 0.2
     verify_timeout: float = 10.0
     max_verify: int = 500
+    # an address you know exists on the domain; probed to detect throttled servers
+    control_address: str = ""
+    # greylisted answers are retried after this many seconds, this many times
+    greylist_wait: float = 0.0
+    greylist_retries: int = 0
+    throttled_as_valid: bool = False
     # output
     min_confidence: int = 0
     only_verified: bool = False

@@ -1,0 +1,5 @@
+mongo cache unavailable: ServerSelectionTimeoutError: No replica set members found yet, Timeout: 6.0s, Topology Description: <TopologyDescription id: 6af072cb10f9573c06609ff3, topology_type: ReplicaSetNoPrimary, servers: [<ServerDescription ('ac-u1ar3w5-shard-00-00.qfrccje.mongodb.net', 27017) server_type: Unknown, rtt: None>, <ServerDescription ('ac-u1ar3w5-shard-00-01.qfrccje.mongodb.net', 27017) server_type: Unknown, rtt: None>, <ServerDescription ('ac-u1ar3w5-shard-00-02.qfrccje.mongodb.net', 27017) server_type: Unknown, rtt: None>]>
+INFO:     Started server process [24032]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8011 (Press CTRL+C to quit)

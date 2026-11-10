@@ -49,84 +49,73 @@ def _summary_markdown(result: dict) -> str:
     return "\n\n".join(lines)
 
 
-def _run(domain, do_linkedin, do_verify, max_pages, sweep_variants, permute_max,
-         progress=gr.Progress()):
-    progress(0.05, desc="starting")
-    logs: "list[str]" = []
+def _run(domain, do_linkedin, do_verify, max_pages, sweep_variants, permute_max):
+    """Generator handler: rows appear as each pipeline stage finds them."""
+    import threading
+    import time
+
+    from ehunter.progress import row_key
+
+    state = {"rows": {}, "log": [], "done": False, "result": None, "error": ""}
+    lock = threading.Lock()
 
     def log(message: str = "", **_kwargs) -> None:
         text = str(message)
-        logs.append(text)
-        if text.strip():
-            progress(min(0.9, 0.05 + 0.01 * len(logs)), desc=text.strip()[:80])
+        with lock:
+            state["log"].append(text)
+            if len(state["log"]) > 500:
+                state["log"] = state["log"][-500:]
 
-    try:
-        result = run_scan(
-            domain,
-            linkedin=bool(do_linkedin),
-            verify=bool(do_verify),
-            max_pages=int(max_pages),
-            sweep_variants=int(sweep_variants),
-            permute_max=int(permute_max),
-            log=log,
-        )
-    except ValueError as exc:
-        return [], None, f"error: {exc}", "### Invalid input\n\n" + str(exc)
-    except Exception as exc:  # noqa: BLE001 - the UI must never die on a bad run
-        logs.append(traceback.format_exc(limit=3))
-        return [], None, "\n".join(logs), f"### Failed\n\n`{type(exc).__name__}: {exc}`"
+    def on_progress(payload: dict) -> None:
+        with lock:
+            for row in payload.get("rows", []):
+                state["rows"][row_key(row)] = row
+            for key in payload.get("removed", []):
+                state["rows"].pop(key, None)
 
+    def worker() -> None:
+        try:
+            state["result"] = run_scan(
+                domain,
+                linkedin=bool(do_linkedin),
+                verify=bool(do_verify),
+                max_pages=int(max_pages),
+                sweep_variants=int(sweep_variants),
+                permute_max=int(permute_max),
+                log=log,
+                progress=on_progress,
+            )
+        except ValueError as exc:
+            state["error"] = f"error: {exc}"
+        except Exception as exc:  # noqa: BLE001
+            state["error"] = f"{type(exc).__name__}: {exc}"
+        finally:
+            state["done"] = True
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def render(status: str):
+        with lock:
+            rows = [[row.get(column, "") for column in DISPLAY_COLUMNS]
+                    for row in state["rows"].values()]
+            logs = "\n".join(state["log"][-200:])
+        return rows, None, logs, status
+
+    while not state["done"]:
+        yield render(f"Scanning {domain} - {len(state['rows'])} row(s) so far...")
+        time.sleep(0.8)
+
+    if state["error"]:
+        with lock:
+            logs = "\n".join(state["log"])
+        yield [], None, logs, f"### Failed\n\n`{state['error']}`"
+        return
+
+    result = state["result"]
     rows = [[row.get(column, "") for column in DISPLAY_COLUMNS] for row in result["rows"]]
-    progress(1.0, desc="done")
-    return rows, result["csv_path"], "\n".join(logs), _summary_markdown(result)
-
-
-def _gradio_major() -> int:
-    try:
-        return int(str(getattr(gr, "__version__", "5")).split(".", 1)[0])
-    except (TypeError, ValueError):
-        return 5
-
-
-def _blocks_kwargs() -> dict:
-    """Gradio 6 moved `theme` out of the Blocks constructor into launch()."""
-    kwargs = {"title": TITLE}
-    if _gradio_major() < 6:
-        kwargs["theme"] = gr.themes.Soft()
-    return kwargs
-
-
-def _launch_kwargs() -> dict:
-    from pathlib import Path
-
-    Path("out").mkdir(parents=True, exist_ok=True)      # allowed_paths target must exist
-    port = int(os.environ.get("GRADIO_SERVER_PORT") or os.environ.get("PORT") or 7860)
-    kwargs = {
-        "server_name": "0.0.0.0",
-        "server_port": port,
-        "allowed_paths": [str(Path("out").resolve())],
-        "show_error": True,
-    }
-    if _gradio_major() >= 6:
-        kwargs["theme"] = gr.themes.Soft()
-        # Gradio 6 puts an SSR Node proxy in front of the Python server on Spaces; the UI
-        # does not use SSR and that proxy is a common reason a Space dies right after
-        # "Running on local URL".
-        kwargs["ssr_mode"] = False
-    return kwargs
-
-
-def _supported_kwargs(fn, kwargs: dict) -> dict:
-    """Drop parameters this Gradio version does not accept (5.x vs 6.x)."""
-    import inspect
-
-    try:
-        params = inspect.signature(fn).parameters
-    except (TypeError, ValueError):
-        return kwargs
-    if any(param.kind is param.VAR_KEYWORD for param in params.values()):
-        return kwargs
-    return {key: value for key, value in kwargs.items() if key in params}
+    with lock:
+        logs = "\n".join(state["log"])
+    yield rows, result["csv_path"], logs, _summary_markdown(result)
 
 
 def build_ui() -> "gr.Blocks":
@@ -158,7 +147,8 @@ def build_ui() -> "gr.Blocks":
             with gr.Row():
                 max_pages = gr.Slider(2, 25, value=8, step=1, label="Website pages")
                 sweep_variants = gr.Slider(2, 20, value=10, step=1, label="LinkedIn query variants")
-                permute_max = gr.Slider(1, 19, value=6, step=1, label="Email candidates per person")
+                permute_max = gr.Slider(1, 19, value=19, step=1,
+                                label="Email candidates per person")
 
         run_button = gr.Button("Scan", variant="primary")
         summary = gr.Markdown()

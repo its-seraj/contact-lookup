@@ -7,10 +7,10 @@ included - block outbound port 25, which makes mailbox verification impossible t
 
 from __future__ import annotations
 
-import socket
 import time
 from pathlib import Path
 
+from . import smtp
 from .config import env
 from .models import CSV_COLUMNS
 from .pipeline import scan
@@ -21,6 +21,7 @@ from .util import normalize_domain, now_stamp
 PROBE_HOST = "gmail-smtp-in.l.google.com"
 _PORT25: "bool | None" = None
 _PORT25_AT = 0.0
+_PORT25_WHY = ""
 PORT25_TTL = 300
 
 DISPLAY_COLUMNS = [
@@ -36,26 +37,27 @@ DISPLAY_COLUMNS = [
 ]
 
 
-def port25_available(timeout: float = 3.0) -> bool:
+def port25_available(timeout: float = 8.0) -> bool:
     """True when this host can open an outbound SMTP connection.
 
-    IPv4 is resolved first and the cache expires, because a plain create_connection()
-    spends 10s+ walking IPv6 candidates before failing.
+    Tries IPv6 and IPv4 (a network may block only one) and caches the answer briefly.
     """
-    global _PORT25, _PORT25_AT
+    global _PORT25, _PORT25_AT, _PORT25_WHY
     if _PORT25 is not None and (time.time() - _PORT25_AT) < PORT25_TTL:
         return _PORT25
-    try:
-        info = socket.getaddrinfo(PROBE_HOST, 25, socket.AF_INET, socket.SOCK_STREAM)
-        family, socktype, proto, _canon, address = info[0]
-        with socket.socket(family, socktype, proto) as sock:
-            sock.settimeout(timeout)
-            sock.connect(address)
-        _PORT25 = True
-    except OSError:
-        _PORT25 = False
+    # Goes through SMTP_PROXY when one is configured, so a working tunnel counts as "open".
+    _PORT25, _PORT25_WHY = smtp.check_port25(PROBE_HOST, timeout)
     _PORT25_AT = time.time()
     return _PORT25
+
+
+def port25_problem() -> str:
+    """Why the last port-25 check failed, worded for the person who has to fix it."""
+    if smtp.proxy_settings() is not None:
+        return (f"the SMTP proxy ({env('SMTP_PROXY')}) could not reach port 25: "
+                f"{_PORT25_WHY}. Is the tunnel up (ssh -D) and does its host allow port 25?")
+    return ("outbound port 25 is blocked on this host. Switch networks, or set SMTP_PROXY "
+            "to a SOCKS5 tunnel through a host that allows port 25.")
 
 
 def port25_cached() -> "bool | None":
@@ -71,10 +73,11 @@ def run_scan(
     max_pages: int = 8,
     sweep_variants: int = 10,
     sweep_depth: int = 3,
-    permute_max: int = 6,
+    permute_max: int = 19,
     max_verify: int = 400,
     out_dir: str = "out",
     log=None,
+    progress=None,
 ) -> dict:
     """Discover people for `domain` and return rows + a CSV path.
 
@@ -84,9 +87,12 @@ def run_scan(
     log = log or (lambda *_a, **_k: None)
     domain = normalize_domain(domain)
 
+    warnings: "list[str]" = []
     if verify and not port25_available():
-        log("  [!] outbound port 25 is blocked on this host - email verification "
-            "and permutation are disabled (addresses stay unverified guesses)")
+        message = (f"email verification and permutation did not run, so people without a "
+                   f"published address have no email: {port25_problem()}")
+        log(f"  [!] {message}")
+        warnings.append(message)
         verify = False
 
     from .context import Options
@@ -108,7 +114,7 @@ def run_scan(
         verify_timeout=8.0,
     )
 
-    result = scan(domain, opts, log=log)
+    result = scan(domain, opts, log=log, progress=progress)
 
     outdir = Path(out_dir) / domain
     stamp = now_stamp()
@@ -120,6 +126,8 @@ def run_scan(
         "columns": list(CSV_COLUMNS),
         "csv_path": str(csv_path),
         "meta": result.meta,
+        "verify_ran": bool(verify),     # False when it was requested but port 25 is blocked
+        "warnings": warnings,
         "counts": {
             "people": len(result.records),
             "with_email": sum(1 for r in result.records if r.email),

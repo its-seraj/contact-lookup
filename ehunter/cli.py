@@ -203,6 +203,9 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--permute", action="store_true",
                       help="for people without a working address, walk the email "
                            "permutation ladder until one is accepted (implies --verify)")
+    scan.add_argument("--permute-all", action="store_true", dest="permute_all",
+                      help="try every candidate for every spelling instead of stopping "
+                           "after 8 rejections (slow, and more likely to be throttled)")
     scan.add_argument("--permute-max", type=int, nargs="?", const=19, default=19,
                       dest="permute_max", metavar="N",
                       help="candidate addresses to try per person (default 19; the flag "
@@ -212,6 +215,20 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--verify-delay", type=float, default=0.2, dest="verify_delay")
     scan.add_argument("--verify-timeout", type=float, default=10.0, dest="verify_timeout")
     scan.add_argument("--max-verify", type=int, default=500, dest="max_verify")
+    scan.add_argument("--control", default="", dest="control_address", metavar="EMAIL",
+                      help="an address you KNOW exists on the domain (or set VERIFY_CONTROL). "
+                           "It is probed during verification; if the server refuses it, the "
+                           "'no such user' answers are treated as throttling, not truth")
+    scan.add_argument("--greylist-wait", type=float, default=0.0, dest="greylist_wait",
+                      metavar="SECONDS",
+                      help="wait before re-probing addresses that answered 4xx (default 60)")
+    scan.add_argument("--throttled-as-valid", action="store_true", dest="throttled_as_valid",
+                      help="when the server answers 4xx for a candidate, record it as "
+                           "valid at confidence 70 instead of greylisted")
+    scan.add_argument("--greylist-retries", type=int, default=0, dest="greylist_retries",
+                      metavar="N",
+                      help="re-probe greylisted addresses N times after a wait "
+                           "(default 0 = off: the ladder's answer is final)")
     scan.add_argument("--threads", type=int, default=8)
     scan.add_argument("--timeout", type=float, default=20.0, help="HTTP timeout seconds")
     scan.add_argument("--delay", type=float, default=0.4, help="per-host request delay seconds")
@@ -285,6 +302,9 @@ def build_parser() -> argparse.ArgumentParser:
     ln.add_argument("--json", action="store_true", dest="json_stdout")
     ln.add_argument("--quiet", action="store_true")
 
+    db = sub.add_parser("dbcheck", help="check the MongoDB result cache")
+    db.add_argument("--uri", default="", help="override the URL from the environment")
+
     sub.add_parser("sources", help="show which sources are configured")
     return parser
 
@@ -318,10 +338,15 @@ def _cmd_scan(args) -> int:
         verify=args.verify or args.permute,
         permute=args.permute,
         permute_max=max(1, args.permute_max),
+        permute_all=args.permute_all,
         from_addr=args.from_addr or env("VERIFY_FROM") or "noreply@example.com",
         verify_delay=max(0.0, args.verify_delay),
         verify_timeout=args.verify_timeout,
         max_verify=max(0, args.max_verify),
+        control_address=(args.control_address or env("VERIFY_CONTROL") or "").strip(),
+        greylist_wait=max(0.0, args.greylist_wait),
+        greylist_retries=max(0, args.greylist_retries),
+        throttled_as_valid=args.throttled_as_valid,
         min_confidence=max(0, args.min_confidence),
         only_verified=args.only_verified,
         keep_invalid=args.keep_invalid,
@@ -530,6 +555,44 @@ def _cmd_linkedin(args) -> int:
     return 0
 
 
+def _cmd_dbcheck(args) -> int:
+    from .store import MONGO_ENV_NAMES, DomainStore, find_uri
+
+    uri, source = (args.uri, "argument") if args.uri else find_uri()
+    store = DomainStore(uri=uri or None)
+    info = store.health()
+
+    print(f"  mongo url   : {'set via ' + source if store.uri else 'not found'}")
+    if store.uri:
+        safe = store.uri.split("@")[-1] if "@" in store.uri else store.uri
+        print(f"  target      : {safe[:80]}")
+    print(f"  pymongo     : ", end="")
+    try:
+        import pymongo
+        print(pymongo.version)
+    except ImportError:
+        print("MISSING  ->  python -m pip install \"pymongo[srv]\"")
+    print(f"  cache       : {'ready' if info['enabled'] else 'unavailable'}")
+    if info.get("error"):
+        print(f"  reason      : {info['error']}")
+    if not info["enabled"]:
+        if not store.uri:
+            print(f"\n  Put the URL in .env as one of: {', '.join(MONGO_ENV_NAMES)}")
+        return 1
+
+    started = __import__("time").time()
+    docs = store.list_domains(limit=5)
+    elapsed = int((__import__("time").time() - started) * 1000)
+    print(f"  db          : {info['db']}.{info['collection']}")
+    print(f"  round trip  : {elapsed} ms")
+    print(f"  cached      : {len(docs)} domain(s)")
+    for doc in docs[:5]:
+        counts = doc.get("counts") or {}
+        print(f"    - {doc.get('domain', '?')}  {counts.get('people', '?')} people  "
+              f"{doc.get('scanned_at', '')}")
+    return 0
+
+
 def _cmd_sources(_args) -> int:
     rows = []
     for item in source_registry.describe():
@@ -554,6 +617,8 @@ def main(argv=None) -> int:
             return _cmd_patterns(args)
         if args.command == "sources":
             return _cmd_sources(args)
+        if args.command == "dbcheck":
+            return _cmd_dbcheck(args)
         if args.command == "permute":
             return _cmd_permute(args)
         if args.command == "linkedin":

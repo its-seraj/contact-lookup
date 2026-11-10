@@ -402,7 +402,14 @@ class Search(Source):
 
     # ------------------------------------------------------------------
     def sweep_linkedin(self, ctx, depth: int = 3, max_variants: int = 14) -> "list[dict]":
-        """Fan out many query variants and return every unique profile found."""
+        """Fan out many query variants and return every unique profile found.
+
+        Queries run concurrently (bounded), because each one is dominated by the search
+        API's latency: 25 variants sequentially cost minutes, four at a time cost ~30s.
+        """
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
         from ..sweep import classify, slug_from_link, title_parts, variants
 
         names = ctx.memo("company_names") or [ctx.domain.split(".")[0]]
@@ -410,29 +417,41 @@ class Search(Source):
         ctx.info(f"    linkedin: {len(queries)} query variant(s) x {depth} page(s)")
 
         found: dict = {}
-        for query in queries:
-            for item in self._collect(ctx, query, pages=depth, relevant=False):
-                slug = slug_from_link(item.get("link") or "")
-                if not slug:
-                    continue
-                if slug in found:
-                    if query not in found[slug]["queries"]:
-                        found[slug]["queries"].append(query)
-                    continue
-                title = item.get("title") or ""
-                snippet = item.get("snippet") or ""
-                employment, reason = classify(title, snippet, names)
-                name, role = title_parts(title)
-                found[slug] = {
-                    "slug": slug,
-                    "url": linkedin_url(item.get("link") or ""),
-                    "full_name": name,
-                    "title": role,
-                    "employment": employment,
-                    "evidence": reason,
-                    "snippet": snippet[:300],
-                    "queries": [query],
-                }
+        lock = threading.Lock()
+
+        def run_query(query: str) -> None:
+            try:
+                items = list(self._collect(ctx, query, pages=depth, relevant=False))
+            except Exception as exc:  # noqa: BLE001 - one query must not kill the sweep
+                ctx.info(f"    linkedin: query failed ({type(exc).__name__}: {exc})")
+                return
+            with lock:
+                for item in items:
+                    slug = slug_from_link(item.get("link") or "")
+                    if not slug:
+                        continue
+                    if slug in found:
+                        if query not in found[slug]["queries"]:
+                            found[slug]["queries"].append(query)
+                        continue
+                    title = item.get("title") or ""
+                    snippet = item.get("snippet") or ""
+                    employment, reason = classify(title, snippet, names)
+                    name, role = title_parts(title)
+                    found[slug] = {
+                        "slug": slug,
+                        "url": linkedin_url(item.get("link") or ""),
+                        "full_name": name,
+                        "title": role,
+                        "employment": employment,
+                        "evidence": reason,
+                        "snippet": snippet[:300],
+                        "queries": [query],
+                    }
+
+        workers = min(4, max(1, len(queries)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(run_query, queries))
         ctx.info(f"    linkedin: {len(found)} unique profile(s)")
         return list(found.values())
 

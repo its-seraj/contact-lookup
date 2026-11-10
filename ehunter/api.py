@@ -10,7 +10,8 @@ Body:
 
     {"domains": ["acme.com", "beta.io"], "isVerify": false, "isLinkedin": true, "force": false}
 
-Events on the stream: `start`, `log`, `cached`, `result`, `error`, `done`.
+Events on the stream: `start`, `log`, `warning`, `cached`, `result`, `error`, `done`.
+`warning` means a requested step did not run (e.g. verification with port 25 blocked).
 """
 
 from __future__ import annotations
@@ -62,6 +63,12 @@ class ScanBody(BaseModel):
     )
     isVerify: bool = Field(default=False, description="run SMTP verification + permutation")
     isLinkedin: bool = Field(default=True, description="run the LinkedIn profile sweep")
+    permuteMax: int = Field(default=19, ge=1, le=19,
+                            description="candidate addresses tried per person")
+    maxPages: int = Field(default=8, ge=2, le=25,
+                          description="website pages to crawl")
+    sweepVariants: int = Field(default=10, ge=2, le=20,
+                               description="LinkedIn query variants (costs search credits)")
     force: bool = Field(default=False, description="ignore the cached result and rescan")
 
 
@@ -94,31 +101,45 @@ async def _stream(domains: "List[str]", flags: ScanFlags, force: bool, encode) -
                 "rows": cached.get("rows") or [],
                 "meta": cached.get("meta") or {},
                 "counts": cached.get("counts") or {},
+                "warnings": cached.get("warnings") or [],
                 "cached": True,
             })
             continue
 
         yield encode({"type": "start", "domain": domain})
-        queue: "asyncio.Queue[str]" = asyncio.Queue()
+        queue: "asyncio.Queue[tuple]" = asyncio.Queue()
         loop = asyncio.get_running_loop()
 
         def log(message: str = "", **_kwargs) -> None:
-            loop.call_soon_threadsafe(queue.put_nowait, str(message))
+            loop.call_soon_threadsafe(queue.put_nowait, ("log", str(message)))
 
-        task = asyncio.create_task(asyncio.to_thread(run_domain, domain, flags, log))
+        def progress(payload: dict) -> None:
+            loop.call_soon_threadsafe(queue.put_nowait, ("partial", payload))
+
+        task = asyncio.create_task(
+            asyncio.to_thread(run_domain, domain, flags, log, progress)
+        )
+
+        def _event(kind: str, payload) -> bytes | str:
+            if kind == "partial":
+                return encode({"type": "partial", "domain": domain, **payload})
+            return encode({"type": "log", "domain": domain, "message": payload})
+
         while True:
             getter = asyncio.create_task(queue.get())
             done, _pending = await asyncio.wait(
                 {getter, task}, return_when=asyncio.FIRST_COMPLETED
             )
             if getter in done:
-                yield encode({"type": "log", "domain": domain, "message": getter.result()})
+                kind, payload = getter.result()
+                yield _event(kind, payload)
                 continue
             getter.cancel()
             break
 
         while not queue.empty():
-            yield encode({"type": "log", "domain": domain, "message": queue.get_nowait()})
+            kind, payload = queue.get_nowait()
+            yield _event(kind, payload)
 
         try:
             result = task.result()
@@ -131,6 +152,8 @@ async def _stream(domains: "List[str]", flags: ScanFlags, force: bool, encode) -
             continue
 
         doc = build_doc(domain, result, flags)
+        for warning in doc["warnings"]:
+            yield encode({"type": "warning", "domain": domain, "message": warning})
         stored = await asyncio.to_thread(store().upsert, domain, doc)
         yield encode({
             "type": "result",
@@ -138,6 +161,7 @@ async def _stream(domains: "List[str]", flags: ScanFlags, force: bool, encode) -
             "rows": doc["rows"],
             "meta": doc["meta"],
             "counts": doc["counts"],
+            "warnings": doc["warnings"],
             "scanned_at": doc["scanned_at"],
             "cached": stored,
         })
@@ -157,7 +181,13 @@ async def scan(body: ScanBody, format: str = Query("ndjson", pattern="^(ndjson|s
     if not domains and not errors:
         raise HTTPException(status_code=400, detail="no domains provided")
 
-    flags = ScanFlags(is_verify=bool(body.isVerify), is_linkedin=bool(body.isLinkedin))
+    flags = ScanFlags(
+        is_verify=bool(body.isVerify),
+        is_linkedin=bool(body.isLinkedin),
+        permute_max=int(body.permuteMax or 19),
+        max_pages=int(body.maxPages or 8),
+        sweep_variants=int(body.sweepVariants or 10),
+    )
     encode, media_type = _encoder(format)
 
     async def generator():
@@ -240,7 +270,20 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(router, prefix="/api")
+    _report_cache()
     return app
+
+
+def _report_cache() -> None:
+    """Say out loud whether the cache is usable - silence here is how it went unnoticed."""
+    info = store().warm()
+    if info["enabled"]:
+        line = (f"mongo cache: ready via {info['from']} "
+                f"({info['db']}.{info['collection']}, {info['ping_ms']} ms)")
+        print(f"[api] {line}", flush=True)
+    else:
+        line = f"mongo cache: disabled - {info['error']}"
+        print(f"[api] {line}", flush=True)
 
 
 app = create_app()
