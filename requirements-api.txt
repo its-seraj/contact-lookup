@@ -1,4 +1,4 @@
-# Only needed to serve the HTTP API / server.py (the CLI and the Gradio Space do not).
+# Needed to serve the HTTP API (server.py). The CLI itself is standard library only.
 fastapi>=0.110
 uvicorn[standard]>=0.27
 pymongo>=4.6

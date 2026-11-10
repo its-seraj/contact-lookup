@@ -1,0 +1,13 @@
+.git
+.env
+out/
+vendor/
+.venv/
+.deps/
+.tmp/
+_stub/
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.log
+tests/

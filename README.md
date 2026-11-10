@@ -3,10 +3,8 @@ title: Contact Lookup
 emoji: 😻
 colorFrom: blue
 colorTo: indigo
-sdk: gradio
-sdk_version: 6.31.0
-python_version: '3.12'
-app_file: app.py
+sdk: docker
+app_port: 7860
 suggested_hardware: cpu-basic
 pinned: false
 license: mit
@@ -503,7 +501,7 @@ The same engine is exposed as a JSON API for a web front end.
 ```bash
 pip install -r requirements-api.txt          # fastapi, uvicorn, pymongo
 set MONGODB_URI=mongodb://localhost:27017    # optional: cache is skipped without it
-python -m server                             # API on :8000, Gradio UI on /ui
+python -m server                             # API on :8000, docs on /docs
 ```
 
 | Method | Route | Purpose |
@@ -624,19 +622,23 @@ needed. Without `pymongo` or a reachable server the cache silently degrades to "
 
 ## Deploy on Hugging Face
 
-The repository doubles as a Gradio Space: `app.py` + `requirements.txt` + the YAML front
-matter are already in place, so pushing it to a Space is enough.
+The repo deploys as a **Docker Space** that serves only the HTTP API (no UI; the front end
+lives in its own repo). `Dockerfile` runs `uvicorn server:app` on port 7860 and the README
+front matter declares `sdk: docker` / `app_port: 7860`.
 
 ```bash
-git clone https://huggingface.co/spaces/<user>/ehunter
-cp -r ./* .                      # app.py, ehunter/, requirements.txt, README.md
-git add -A && git commit -m "ehunter space" && git push
+git clone https://huggingface.co/spaces/<user>/<space>
+cp -r ./* .                      # Dockerfile, server.py, ehunter/, requirements-api.txt, README.md
+git add -A && git commit -m "api space" && git push
 ```
 
-Add `SERPER_API_KEY` and `GITHUB_TOKEN` in the Space's *Variables and secrets*, keep the
-Space **private** (results are personal data), and note the hard limit: **port 25 is blocked
-on Hugging Face, so SMTP verification cannot run there** — discovery works, addresses come
-back as unverified guesses. Full checklist, limits and workarounds: [DEPLOY_HF.md](DEPLOY_HF.md).
+The API is then at `https://<user>-<space>.hf.space/api/...` (`/api/health`, `/api/scan`,
+`/docs`). Add `SERPER_API_KEY`, `GITHUB_TOKEN`, `MONGODB_URI`, `CORS_ORIGINS` (your UI's
+origin) and optionally `API_KEY` (clients then send `X-API-Key`) in *Variables and secrets*.
+A private Space also needs `Authorization: Bearer <hf token>` on every call, so call it
+from your backend, not from browser code. **Port 25 is blocked on Hugging Face**, so SMTP
+verification cannot run there - addresses come back as unverified guesses. Details:
+[DEPLOY_HF.md](DEPLOY_HF.md).
 
 ## Use it on data you are allowed to touch
 
