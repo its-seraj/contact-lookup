@@ -118,6 +118,54 @@ def _run(domain, do_linkedin, do_verify, max_pages, sweep_variants, permute_max)
     yield rows, result["csv_path"], logs, _summary_markdown(result)
 
 
+def _gradio_major() -> int:
+    try:
+        return int(str(getattr(gr, "__version__", "5")).split(".", 1)[0])
+    except (TypeError, ValueError):
+        return 5
+
+
+def _blocks_kwargs() -> dict:
+    """Gradio 6 moved `theme` out of the Blocks constructor into launch()."""
+    kwargs = {"title": TITLE}
+    if _gradio_major() < 6:
+        kwargs["theme"] = gr.themes.Soft()
+    return kwargs
+
+
+def _launch_kwargs() -> dict:
+    from pathlib import Path
+
+    Path("out").mkdir(parents=True, exist_ok=True)      # allowed_paths target must exist
+    port = int(os.environ.get("GRADIO_SERVER_PORT") or os.environ.get("PORT") or 7860)
+    kwargs = {
+        "server_name": "0.0.0.0",
+        "server_port": port,
+        "allowed_paths": [str(Path("out").resolve())],
+        "show_error": True,
+    }
+    if _gradio_major() >= 6:
+        kwargs["theme"] = gr.themes.Soft()
+        # Gradio 6 puts an SSR Node proxy in front of the Python server on Spaces; the UI
+        # does not use SSR and that proxy is a common reason a Space dies right after
+        # "Running on local URL".
+        kwargs["ssr_mode"] = False
+    return kwargs
+
+
+def _supported_kwargs(fn, kwargs: dict) -> dict:
+    """Drop parameters this Gradio version does not accept (5.x vs 6.x)."""
+    import inspect
+
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return kwargs
+    if any(param.kind is param.VAR_KEYWORD for param in params.values()):
+        return kwargs
+    return {key: value for key, value in kwargs.items() if key in params}
+
+
 def build_ui() -> "gr.Blocks":
     # Do not probe port 25 here: on a blocked network that costs 10s at cold start and
     # the answer is re-checked per run anyway.
