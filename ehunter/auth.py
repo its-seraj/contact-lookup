@@ -11,6 +11,7 @@ Flow:
        MongoDB (collection ``api_tokens``, one document per user id).
 
     AUTH_SERVICE_URL=https://its-seraj-auth-service.hf.space      # default
+    AUTH_WAKE_SECONDS=90      # if the auth service is asleep, wait this long for it, then retry
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .config import env
+from .keepalive import wake
 from .store import DomainStore
 
 log = logging.getLogger("ehunter.auth")
@@ -38,12 +40,17 @@ _BEARER = {"WWW-Authenticate": "Bearer"}
 
 
 class AuthError(Exception):
-    """Carries the HTTP status we should answer with."""
+    """Carries the HTTP status we should answer with.
 
-    def __init__(self, status: int, detail: str):
+    `asleep` marks failures that look like a sleeping/cold Space (5xx, timeout, refused)
+    as opposed to a definite answer, so the caller may wake it and retry.
+    """
+
+    def __init__(self, status: int, detail: str, asleep: bool = False):
         super().__init__(detail)
         self.status = status
         self.detail = detail
+        self.asleep = asleep
 
 
 class TokenStoreError(Exception):
@@ -52,10 +59,36 @@ class TokenStoreError(Exception):
 
 # ---------------------------------------------------------------------------
 # step 1: who is calling?  (asks the auth service, never decodes the JWT here)
+def auth_base() -> str:
+    return (env("AUTH_SERVICE_URL") or DEFAULT_AUTH_URL).rstrip("/")
+
+
+def health_url() -> str:
+    """JSON health endpoint of the auth service (used to wake and to keep it warm)."""
+    return f"{auth_base()}/health"
+
+
 def fetch_user(authorization: str, timeout: float = 10.0) -> dict:
-    base = (env("AUTH_SERVICE_URL") or DEFAULT_AUTH_URL).rstrip("/")
+    """Verified user for `authorization`. If the auth service looks asleep, wake it
+    (up to AUTH_WAKE_SECONDS) and try once more instead of failing the request."""
+    try:
+        return _fetch_user_once(authorization, timeout)
+    except AuthError as exc:
+        if not exc.asleep:
+            raise
+    try:
+        wait = float(env("AUTH_WAKE_SECONDS") or 90)
+    except ValueError:
+        wait = 90.0
+    log.warning("auth service not answering; waking it (up to %ss)", wait)
+    if not wake(health_url(), wait=wait):
+        raise AuthError(502, "auth service is not responding (it may be waking up); retry shortly")
+    return _fetch_user_once(authorization, timeout)
+
+
+def _fetch_user_once(authorization: str, timeout: float) -> dict:
     request = urllib.request.Request(
-        f"{base}/api/auth/me",
+        f"{auth_base()}/api/auth/me",
         headers={"Authorization": authorization, "Accept": "application/json"},
     )
     try:
@@ -66,10 +99,10 @@ def fetch_user(authorization: str, timeout: float = 10.0) -> dict:
         if exc.code in (401, 403):
             raise AuthError(401, "invalid or expired token") from None
         log.warning("auth service answered %s", exc.code)
-        raise AuthError(502, f"auth service error ({exc.code})") from None
+        raise AuthError(502, f"auth service error ({exc.code})", asleep=exc.code >= 500) from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         log.warning("auth service unreachable: %s", exc)
-        raise AuthError(502, "auth service unreachable") from None
+        raise AuthError(502, "auth service unreachable", asleep=True) from None
     except ValueError:
         raise AuthError(502, "auth service returned invalid JSON") from None
 

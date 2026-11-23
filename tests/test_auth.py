@@ -62,10 +62,52 @@ class FetchUserTests(unittest.TestCase):
 
     def test_upstream_failures_are_502_not_401(self):
         for failure in (_http_error(500), urllib.error.URLError("down"), TimeoutError()):
-            with mock.patch.object(auth.urllib.request, "urlopen", side_effect=failure):
+            with mock.patch.object(auth.urllib.request, "urlopen", side_effect=failure), \
+                    mock.patch.object(auth, "wake", return_value=False):
                 with self.assertRaises(auth.AuthError) as ctx:
                     auth.fetch_user("Bearer abc")
             self.assertEqual(ctx.exception.status, 502)
+
+    def test_sleeping_auth_service_is_woken_then_retried(self):
+        """First call fails like a cold Space; wake() succeeds; the retry returns the user."""
+        outcomes = [urllib.error.URLError("sleeping"), _Response(json.dumps(ME_OK).encode())]
+        with mock.patch.object(auth.urllib.request, "urlopen", side_effect=outcomes) as opened, \
+                mock.patch.object(auth, "wake", return_value=True) as woken:
+            user = auth.fetch_user("Bearer abc")
+        self.assertEqual(user["id"], "u1")
+        self.assertEqual(opened.call_count, 2)
+        woken.assert_called_once()
+        self.assertEqual(woken.call_args[0][0],
+                         "https://its-seraj-auth-service.hf.space/health")
+
+    def test_wake_failure_is_502_without_a_second_verify_call(self):
+        with mock.patch.object(auth.urllib.request, "urlopen",
+                               side_effect=urllib.error.URLError("sleeping")) as opened, \
+                mock.patch.object(auth, "wake", return_value=False):
+            with self.assertRaises(auth.AuthError) as ctx:
+                auth.fetch_user("Bearer abc")
+        self.assertEqual(ctx.exception.status, 502)
+        self.assertEqual(opened.call_count, 1)
+
+    def test_definite_answers_never_trigger_a_wake(self):
+        """A 401 or a bad payload is the auth service speaking: do not poll it."""
+        with mock.patch.object(auth, "wake") as woken:
+            with mock.patch.object(auth.urllib.request, "urlopen", side_effect=_http_error(401)):
+                with self.assertRaises(auth.AuthError):
+                    auth.fetch_user("Bearer bad")
+            with _urlopen_returning({"success": False}):
+                with self.assertRaises(auth.AuthError):
+                    auth.fetch_user("Bearer bad")
+        woken.assert_not_called()
+
+    def test_wake_can_be_disabled(self):
+        with mock.patch.dict("os.environ", {"AUTH_WAKE_SECONDS": "0"}), \
+                mock.patch.object(auth.urllib.request, "urlopen",
+                                  side_effect=urllib.error.URLError("down")), \
+                mock.patch.object(auth, "wake", return_value=False) as woken:
+            with self.assertRaises(auth.AuthError):
+                auth.fetch_user("Bearer abc")
+        self.assertEqual(woken.call_args.kwargs["wait"], 0.0)
 
     def test_unsuccessful_or_userless_payloads_are_401(self):
         for payload in ({"success": False}, {"success": True, "data": {}},

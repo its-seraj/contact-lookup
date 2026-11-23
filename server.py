@@ -28,6 +28,11 @@ for _name in ("SERPER_API_KEY", "BRAVE_API_KEY", "GOOGLE_CSE_KEY", "GITHUB_TOKEN
               "SEARXNG_URL", "SMTP_PROXY", "VERIFY_FROM"):
     print(f"[server] {_name}: {'set' if _env(_name) else '-'}", flush=True)
 
+from ehunter import keepalive  # noqa: E402
+from ehunter.auth import health_url  # noqa: E402
+
+keepalive.autostart([health_url()])     # no-op outside a Space unless KEEPALIVE=1
+
 if __name__ == "__main__":
     import uvicorn
 

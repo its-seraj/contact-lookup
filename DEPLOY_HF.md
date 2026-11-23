@@ -29,6 +29,25 @@ There is no UI here; the front end is a separate repo that calls this API.
 Base URL: `https://<user>-<space>.hf.space` (lowercase; `.` and `_` become `-`).
 Interactive docs: `/docs`.
 
+## Keeping the Spaces awake
+
+Free Spaces sleep after ~48h without traffic and take 30-90 s to cold-start. Two things are built in:
+
+* **Keep-alive loop** (`ehunter/keepalive.py`): inside a Space (HF sets `SPACE_ID`) a background
+  thread pings the auth service's `/health` and this Space's own `/api/health` every 30 min
+  (`KEEPALIVE_INTERVAL_MINUTES`). Off locally unless `KEEPALIVE=1`; `KEEPALIVE=0` turns it off;
+  `KEEPALIVE_URLS` adds more targets. Look for `[keepalive] ... up|DOWN` in the Space log.
+* **Wake on demand** (`ehunter/auth.py`): if verifying a JWT fails because the auth service looks
+  asleep (5xx, timeout, refused), the API polls its `/health` for up to `AUTH_WAKE_SECONDS`
+  (default 90, `0` = off) and retries once, instead of returning an error. A `401` is a real
+  answer and never triggers this. If the wake times out the caller gets `502` and should retry.
+
+**Limit:** a Space that is already asleep runs no code, so this Space cannot keep *itself* awake
+from inside. For a guarantee, add an external pinger on `https://<user>-<space>.hf.space/api/health`
+(UptimeRobot, cron-job.org, or a GitHub Actions `schedule:` cron) every 5-30 min, and do the same
+for the auth service's `/health`. A **paused** Space (not just sleeping) is not woken by requests:
+restart it in Settings.
+
 ## Private Space
 
 Every request needs `Authorization: Bearer <hf_token>`. Do not put that token in browser
@@ -44,7 +63,7 @@ bearer auth above plus `CORS_ORIGINS`.
 | Persisted files in `out/` | none | filesystem is ephemeral; use the MongoDB cache |
 | Long scans | not advisable | ~2 vCPU on the free tier |
 
-Free Spaces sleep after ~48h idle; the first request afterwards is slow.
+Free Spaces sleep after ~48h idle; the first request afterwards is slow (see *Keeping the Spaces awake*).
 
 ## Troubleshooting
 
