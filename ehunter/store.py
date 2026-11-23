@@ -83,6 +83,12 @@ class DomainStore:
             self._col = None
         return self._col
 
+    def collection_named(self, name: str):
+        """Another collection in the same database/connection, or None when not connected."""
+        if self._collection() is None:
+            return None
+        return self._client[self.db_name][name]
+
     # ------------------------------------------------------------------
     def warm(self) -> dict:
         """Connect now and report how long it took (used at server startup)."""

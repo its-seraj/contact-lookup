@@ -21,7 +21,8 @@ There is no UI here; the front end is a separate repo that calls this API.
    * `GITHUB_TOKEN` - otherwise GitHub org members are invisible
    * `MONGODB_URI` (+ optional `MONGODB_DB`) - per-domain cache; without it every scan reruns
    * `CORS_ORIGINS` - your UI's origin(s), comma separated (default `*`)
-   * `API_KEY` - optional; clients must send `X-API-Key`
+   * `API_KEY` - optional service-to-service key, sent as `X-API-Key`. Scan routes otherwise need a sign-in JWT or an `eh_` token (README -> Authentication)
+   * `AUTH_SERVICE_URL` - optional; defaults to `https://its-seraj-auth-service.hf.space` (used by `/api/token`; needs `MONGODB_URI`)
 4. Smoke test: `GET https://<user>-<space>.hf.space/api/health`, then
    `POST /api/scan` with `{"domains":["buffer.com"],"isLinkedin":true}`.
 
@@ -31,8 +32,8 @@ Interactive docs: `/docs`.
 ## Private Space
 
 Every request needs `Authorization: Bearer <hf_token>`. Do not put that token in browser
-code: proxy through your own backend, or make the Space public and protect it with `API_KEY`
-and `CORS_ORIGINS` (note `API_KEY` in a browser bundle is also visible).
+code: proxy through your own backend, or make the Space public and rely on the
+bearer auth above plus `CORS_ORIGINS`.
 
 ## What will not work on HF
 
@@ -51,6 +52,7 @@ Free Spaces sleep after ~48h idle; the first request afterwards is slow.
 |---|---|
 | `/api/health` 404 | the Space is still on the old Gradio SDK: check README front matter says `sdk: docker` and rebuild |
 | 401 from HF | private Space: send the HF bearer token |
-| 401 `missing or invalid X-API-Key` | `API_KEY` is set: send the header |
+| 401 `missing Bearer token` / `invalid API token` | send `Authorization: Bearer <sign-in jwt or eh_ token>` |
+| 503 `token storage unavailable` | `MONGODB_URI` missing: `eh_` tokens are looked up in MongoDB |
 | Browser CORS error | set `CORS_ORIGINS` to the UI origin |
 | `mongo cache: disabled` in logs | `MONGODB_URI` missing or unreachable (`/api/health` says why) |

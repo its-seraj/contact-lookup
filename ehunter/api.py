@@ -5,6 +5,11 @@
     GET  /api/domains/{domain}    -> cached document with rows
     DEL  /api/domains/{domain}    -> drop one cached domain
     GET  /api/health              -> cache availability + port-25 state
+    POST /api/token               -> verify the caller, then generate (or return) their API token
+    GET  /api/token               -> verify the caller, then return their existing API token
+
+The token routes take the auth service's `Authorization: Bearer <jwt>` (JWT only).
+The scan/domains routes take that JWT, an `eh_...` API token, or `X-API-Key`; see auth.py.
 
 Body:
 
@@ -18,15 +23,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import secrets
 import time
 from typing import List, Optional, Union
 
-from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import __version__
+from .auth import (TOKEN_PREFIX, TokenStore, TokenStoreError, bearer_scheme, bearer_token,
+                   current_user, verify_jwt)
 from .config import env
 from .service import (
     MAX_DOMAINS,
@@ -41,13 +50,34 @@ from .webapp import port25_cached
 
 router = APIRouter()
 _STORE: "Optional[DomainStore]" = None
+_TOKENS: "Optional[TokenStore]" = None
 
 
-def require_key(x_api_key: "Optional[str]" = Header(default=None)) -> None:
-    """Optional shared-secret guard: set API_KEY to require the header on every route."""
+async def require_user(
+    credentials: "Optional[HTTPAuthorizationCredentials]" = Depends(bearer_scheme),
+    x_api_key: "Optional[str]" = Header(default=None),
+) -> dict:
+    """Who is calling? Accepts, in this order:
+
+    * `X-API-Key` equal to the API_KEY env var (service-to-server, optional),
+    * `Authorization: Bearer eh_...`  an API token from POST /api/token (MongoDB lookup),
+    * `Authorization: Bearer <jwt>`   the auth service's sign-in token (verified remotely).
+    """
     expected = env("API_KEY")
-    if expected and x_api_key != expected:
-        raise HTTPException(status_code=401, detail="missing or invalid X-API-Key")
+    if expected and x_api_key and secrets.compare_digest(x_api_key, expected):
+        return {"id": "service", "email": "", "name": "service", "picture": "", "roles": ["service"]}
+
+    token = bearer_token(credentials)
+    if not token.startswith(TOKEN_PREFIX):
+        return await verify_jwt(token)
+    try:
+        user = await asyncio.to_thread(tokens().find_user, token)
+    except TokenStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    if user is None:
+        raise HTTPException(status_code=401, detail="invalid API token",
+                            headers={"WWW-Authenticate": "Bearer"})
+    return user
 
 
 def store() -> DomainStore:
@@ -55,6 +85,13 @@ def store() -> DomainStore:
     if _STORE is None:
         _STORE = DomainStore()
     return _STORE
+
+
+def tokens() -> TokenStore:
+    global _TOKENS
+    if _TOKENS is None:
+        _TOKENS = TokenStore(store())
+    return _TOKENS
 
 
 class ScanBody(BaseModel):
@@ -174,7 +211,7 @@ async def _stream(domains: "List[str]", flags: ScanFlags, force: bool, encode) -
 
 
 @router.post("/scan", summary="Scan one or more domains, streaming results as they finish",
-             dependencies=[Depends(require_key)])
+             dependencies=[Depends(require_user)])
 async def scan(body: ScanBody, format: str = Query("ndjson", pattern="^(ndjson|sse)$")):
     limit = int(env("DOMAINS_PER_REQUEST") or MAX_DOMAINS)
     domains, errors = normalize_domains(body.domains, limit=limit)
@@ -207,14 +244,14 @@ async def scan(body: ScanBody, format: str = Query("ndjson", pattern="^(ndjson|s
     )
 
 
-@router.get("/domains", summary="Cached domains", dependencies=[Depends(require_key)])
+@router.get("/domains", summary="Cached domains", dependencies=[Depends(require_user)])
 async def list_domains(limit: int = Query(200, ge=1, le=1000)):
     docs = await asyncio.to_thread(store().list_domains, limit)
     return {"domains": docs, "count": len(docs)}
 
 
 @router.get("/domains/{domain}", summary="Cached result for one domain",
-            dependencies=[Depends(require_key)])
+            dependencies=[Depends(require_user)])
 async def get_domain(domain: str):
     from .util import normalize_domain
 
@@ -230,7 +267,7 @@ async def get_domain(domain: str):
 
 
 @router.delete("/domains/{domain}", summary="Drop a cached domain",
-               dependencies=[Depends(require_key)])
+               dependencies=[Depends(require_user)])
 async def delete_domain(domain: str):
     from .util import normalize_domain
 
@@ -242,6 +279,33 @@ async def delete_domain(domain: str):
     if not removed:
         raise HTTPException(status_code=404, detail=f"{key} is not cached")
     return {"deleted": key}
+
+
+@router.post("/token", summary="Verify the caller, then generate (or return) their API token")
+async def create_token(response: Response, rotate: bool = Query(False, description="replace an existing token"),
+                       user: dict = Depends(current_user)):
+    """201 when a new token was generated, 200 when the existing one is returned."""
+    try:
+        doc, created = await asyncio.to_thread(tokens().issue, user, rotate)
+    except TokenStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    response.status_code = 201 if created else 200
+    return {"created": created, "user": _user_view(user), **doc}
+
+
+@router.get("/token", summary="Verify the caller, then return their existing API token")
+async def get_token(user: dict = Depends(current_user)):
+    try:
+        doc = await asyncio.to_thread(tokens().get, user["id"])
+    except TokenStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    if not doc:
+        raise HTTPException(status_code=404, detail="no token yet: POST /api/token to create one")
+    return {"created": False, "user": _user_view(user), **doc}
+
+
+def _user_view(user: dict) -> dict:
+    return {key: user.get(key, "") for key in ("id", "email", "name", "picture")}
 
 
 @router.get("/health", summary="Service health")

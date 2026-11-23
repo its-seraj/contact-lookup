@@ -511,6 +511,39 @@ python -m server                             # API on :8000, docs on /docs
 | `GET` | `/api/domains/{domain}` | full cached document including rows |
 | `DELETE` | `/api/domains/{domain}` | drop one cached domain |
 | `GET` | `/api/health` | cache status, port-25 state, domain limit |
+| `POST` | `/api/token` | verify the caller, then generate their API token (returns the existing one unless `?rotate=true`); `201` new, `200` existing |
+| `GET` | `/api/token` | verify the caller, then return their existing token (`404` if none yet) |
+
+### Authentication
+
+`/api/scan` and `/api/domains*` need one of these (no credential: `401`; `/api/health` stays public):
+
+| Credential | How it is checked |
+|---|---|
+| `Authorization: Bearer <sign-in jwt>` | forwarded to the auth service's `/api/auth/me` on every call |
+| `Authorization: Bearer eh_...` | an API token from `POST /api/token`, looked up in MongoDB (no auth-service call); rotating it invalidates the old one immediately |
+| `X-API-Key: <API_KEY>` | optional service-to-service key; only honoured when the `API_KEY` env var is set |
+
+`/api/token` itself accepts only the sign-in JWT, so an API token cannot read or rotate itself.
+
+### API tokens (`/api/token`)
+
+Both token routes take the sign-in JWT from the separate auth service. The API forwards
+it to `{AUTH_SERVICE_URL}/api/auth/me` (default `https://its-seraj-auth-service.hf.space`)
+and only generates or returns a token if that call succeeds. Tokens are stored in the
+`api_tokens` collection of the same MongoDB (one per user id), so `MONGODB_URI` is required.
+
+```bash
+curl -X POST https://<space>.hf.space/api/token -H "Authorization: Bearer <sign-in jwt>"
+# {"created":true,"user":{"id":"...","email":"...","name":"...","picture":"..."},
+#  "token":"eh_...","created_at":"..."}
+```
+
+| Status | Meaning |
+|---|---|
+| `401` | missing, malformed, invalid or expired sign-in JWT (nothing is issued) |
+| `502` | auth service unreachable or answered with an error |
+| `503` | MongoDB not connected, so tokens cannot be stored |
 
 ### Request
 
