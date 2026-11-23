@@ -10,7 +10,7 @@ import threading
 import unittest
 from unittest import mock
 
-from ehunter import smtp
+from enrivo import smtp
 
 
 class FakeSocksSmtp(socketserver.ThreadingTCPServer):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pathlib
 import unittest
 
-from ehunter import sweep
+from enrivo import sweep
 
 
 class VariantTests(unittest.TestCase):
@@ -102,7 +102,7 @@ class HelperTests(unittest.TestCase):
 
 class BuildRecordsTests(unittest.TestCase):
     def test_current_profile_gets_high_confidence(self):
-        from ehunter.context import Options
+        from enrivo.context import Options
 
         class Ctx:
             domain = "bamboobox.ai"
@@ -124,7 +124,7 @@ class BuildRecordsTests(unittest.TestCase):
         self.assertIn("linkedin: current", record.notes[0])
 
     def test_profiles_without_a_name_are_dropped(self):
-        from ehunter.context import Options
+        from enrivo.context import Options
 
         class Ctx:
             domain = "bamboobox.ai"
@@ -168,7 +168,7 @@ class ReadProfilesTests(unittest.TestCase):
 
 class LinkedInInputTests(unittest.TestCase):
     def _ctx(self):
-        from ehunter.context import Options
+        from enrivo.context import Options
 
         class Ctx:
             domain = "acme.com"
@@ -189,7 +189,7 @@ class LinkedInInputTests(unittest.TestCase):
         return Ctx()
 
     def test_saved_sweep_becomes_contacts_and_former_is_dropped(self):
-        from ehunter.pipeline import _linkedin_records
+        from enrivo.pipeline import _linkedin_records
 
         profiles = [
             {"employment": "current", "full_name": "Jane Doe", "title": "CTO",
@@ -213,7 +213,7 @@ class LinkedInInputTests(unittest.TestCase):
         self.assertTrue(all(r.email == "" for r in records))
 
     def test_duplicate_slugs_collapse(self):
-        from ehunter.pipeline import _linkedin_records
+        from enrivo.pipeline import _linkedin_records
 
         profiles = [
             {"employment": "current", "full_name": "Jane Doe", "title": "CTO",

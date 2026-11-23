@@ -9,7 +9,7 @@ import unittest
 import urllib.error
 from unittest import mock
 
-from ehunter import api, auth
+from enrivo import api, auth
 
 USER = {"id": "u1", "email": "a@b.co", "name": "Seraj", "picture": "", "roles": ["user"]}
 ME_OK = {"success": True, "data": {"user": {

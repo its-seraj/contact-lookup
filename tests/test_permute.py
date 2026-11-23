@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import unittest
 
-from ehunter import permute
-from ehunter.context import Options
-from ehunter.models import Record
-from ehunter.pipeline import resolve_permutations
+from enrivo import permute
+from enrivo.context import Options
+from enrivo.models import Record
+from enrivo.pipeline import resolve_permutations
 
 
 class FakeCtx:
@@ -214,7 +214,7 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(counts["exhausted"], 1)
 
     def test_dirty_name_has_more_candidates_than_the_ladder(self):
-        from ehunter import permute
+        from enrivo import permute
 
         clean = permute.candidates("Jane", "Doe", "acme.com")
         dirty = permute.candidates("Jane99", "Doe", "acme.com")
@@ -428,7 +428,7 @@ class SmtpAuditTests(unittest.TestCase):
     def setUp(self):
         from unittest import mock
 
-        from ehunter import smtp
+        from enrivo import smtp
 
         self.smtp = smtp
         FakeSMTP.sessions = 0

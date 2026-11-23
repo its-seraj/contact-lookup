@@ -11,8 +11,8 @@ from __future__ import annotations
 import logging
 import os
 
-from ehunter.api import app as app  # module-level app: created once, plugins mount onto it
-from ehunter.config import load_dotenv
+from enrivo.api import app as app  # module-level app: created once, plugins mount onto it
+from enrivo.config import load_dotenv
 
 load_dotenv()
 
@@ -22,14 +22,14 @@ logging.basicConfig(
 )
 logging.getLogger("pymongo").setLevel(logging.WARNING)
 
-from ehunter.config import env as _env  # noqa: E402  (after load_dotenv)
+from enrivo.config import env as _env  # noqa: E402  (after load_dotenv)
 
 for _name in ("SERPER_API_KEY", "BRAVE_API_KEY", "GOOGLE_CSE_KEY", "GITHUB_TOKEN",
               "SEARXNG_URL", "SMTP_PROXY", "VERIFY_FROM"):
     print(f"[server] {_name}: {'set' if _env(_name) else '-'}", flush=True)
 
-from ehunter import keepalive  # noqa: E402
-from ehunter.auth import health_url  # noqa: E402
+from enrivo import keepalive  # noqa: E402
+from enrivo.auth import health_url  # noqa: E402
 
 keepalive.autostart([health_url()])     # no-op outside a Space unless KEEPALIVE=1
 

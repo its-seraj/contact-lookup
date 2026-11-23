@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from ehunter.progress import RowEmitter, row_key
+from enrivo.progress import RowEmitter, row_key
 
 
 class RowKeyTests(unittest.TestCase):

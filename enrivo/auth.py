@@ -32,7 +32,7 @@ from .config import env
 from .keepalive import wake
 from .store import DomainStore
 
-log = logging.getLogger("ehunter.auth")
+log = logging.getLogger("enrivo.auth")
 
 DEFAULT_AUTH_URL = "https://its-seraj-auth-service.hf.space"
 TOKEN_PREFIX = "eh_"

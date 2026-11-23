@@ -1,6 +1,6 @@
-# Deploying the ehunter API on Hugging Face Spaces
+# Deploying the Enrivo API on Hugging Face Spaces
 
-The Space is a **Docker Space** that serves only the JSON API (`server.py` -> `ehunter.api`).
+The Space is a **Docker Space** that serves only the JSON API (`server.py` -> `enrivo.api`).
 There is no UI here; the front end is a separate repo that calls this API.
 
 ## Files that matter
@@ -9,8 +9,8 @@ There is no UI here; the front end is a separate repo that calls this API.
 |---|---|
 | `README.md` front matter | `sdk: docker`, `app_port: 7860` |
 | `Dockerfile` | installs `requirements-api.txt`, runs `uvicorn server:app --port 7860` as uid 1000 |
-| `server.py` | exposes `ehunter.api.app` |
-| `ehunter/webapp.py` | `run_scan()` caps (pages, variants, probe budget) and cached port-25 check |
+| `server.py` | exposes `enrivo.api.app` |
+| `enrivo/webapp.py` | `run_scan()` caps (pages, variants, probe budget) and cached port-25 check |
 
 ## Deploy
 
@@ -33,11 +33,11 @@ Interactive docs: `/docs`.
 
 Free Spaces sleep after ~48h without traffic and take 30-90 s to cold-start. Two things are built in:
 
-* **Keep-alive loop** (`ehunter/keepalive.py`): inside a Space (HF sets `SPACE_ID`) a background
+* **Keep-alive loop** (`enrivo/keepalive.py`): inside a Space (HF sets `SPACE_ID`) a background
   thread pings the auth service's `/health` and this Space's own `/api/health` every 30 min
   (`KEEPALIVE_INTERVAL_MINUTES`). Off locally unless `KEEPALIVE=1`; `KEEPALIVE=0` turns it off;
   `KEEPALIVE_URLS` adds more targets. Look for `[keepalive] ... up|DOWN` in the Space log.
-* **Wake on demand** (`ehunter/auth.py`): if verifying a JWT fails because the auth service looks
+* **Wake on demand** (`enrivo/auth.py`): if verifying a JWT fails because the auth service looks
   asleep (5xx, timeout, refused), the API polls its `/health` for up to `AUTH_WAKE_SECONDS`
   (default 90, `0` = off) and retries once, instead of returning an error. A `401` is a real
   answer and never triggers this. If the wake times out the caller gets `502` and should retry.

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import unittest
 
-from ehunter import patterns
-from ehunter.names import (
+from enrivo import patterns
+from enrivo.names import (
     email_localpart,
     looks_like_name,
     looks_like_title,
@@ -15,14 +15,14 @@ from ehunter.names import (
     split_name_title,
     strip_accents,
 )
-from ehunter.pipeline import (dedupe_records, generate_emails, infer_pattern,
+from enrivo.pipeline import (dedupe_records, generate_emails, infer_pattern,
                               merge_records)
-from ehunter.sources.base import rec
-from ehunter.sources.pgp import parse_mr_keys, unescape_mr
-from ehunter.sources.web import is_generic, parse_html
-from ehunter.net import decode_body
-from ehunter.sources.web import company_tail, is_external_title
-from ehunter.util import find_emails, normalize_domain, registrable
+from enrivo.sources.base import rec
+from enrivo.sources.pgp import parse_mr_keys, unescape_mr
+from enrivo.sources.web import is_generic, parse_html
+from enrivo.net import decode_body
+from enrivo.sources.web import company_tail, is_external_title
+from enrivo.util import find_emails, normalize_domain, registrable
 
 
 class FakeCtx:

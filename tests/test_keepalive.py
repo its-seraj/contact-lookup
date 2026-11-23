@@ -8,7 +8,7 @@ import unittest
 import urllib.error
 from unittest import mock
 
-from ehunter import keepalive
+from enrivo import keepalive
 
 
 class _Response(io.BytesIO):

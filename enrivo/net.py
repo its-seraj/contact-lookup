@@ -15,7 +15,7 @@ import urllib.request
 import zlib
 
 DEFAULT_UA = (
-    "Mozilla/5.0 (compatible; ehunter/1.0; domain-research-tool)"
+    "Mozilla/5.0 (compatible; enrivo/1.0; domain-research-tool)"
 )
 
 

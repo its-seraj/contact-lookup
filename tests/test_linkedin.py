@@ -5,11 +5,11 @@ from __future__ import annotations
 import base64
 import unittest
 
-from ehunter import gravatar
-from ehunter.net import HttpError
-from ehunter.sources.search import Search, parse_bing, parse_ddg, parse_searx
-from ehunter.sources.web import parse_humans_txt, parse_html
-from ehunter.util import linkedin_matches_name, linkedin_slug, linkedin_url
+from enrivo import gravatar
+from enrivo.net import HttpError
+from enrivo.sources.search import Search, parse_bing, parse_ddg, parse_searx
+from enrivo.sources.web import parse_humans_txt, parse_html
+from enrivo.util import linkedin_matches_name, linkedin_slug, linkedin_url
 
 
 class LinkedInUtilTests(unittest.TestCase):
@@ -219,9 +219,9 @@ if __name__ == "__main__":
 
 class GitHubHandleTests(unittest.TestCase):
     def test_member_without_display_name_is_kept_as_handle_row(self):
-        from ehunter.context import Options
-        from ehunter.net import HttpError
-        from ehunter.sources.github import GitHub
+        from enrivo.context import Options
+        from enrivo.net import HttpError
+        from enrivo.sources.github import GitHub
 
         class FakeHttp:
             def get_json(self, url, **kwargs):

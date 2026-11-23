@@ -6,8 +6,8 @@ import asyncio
 import unittest
 from unittest import mock
 
-from ehunter import api
-from ehunter.service import MAX_DOMAINS, ScanFlags, build_doc, cache_covers, normalize_domains
+from enrivo import api
+from enrivo.service import MAX_DOMAINS, ScanFlags, build_doc, cache_covers, normalize_domains
 
 
 class NormalizeTests(unittest.TestCase):
@@ -180,8 +180,8 @@ class PermuteMaxTests(unittest.TestCase):
     def test_defaults_are_nineteen_everywhere(self):
         import inspect
 
-        from ehunter.service import ScanFlags
-        from ehunter.webapp import run_scan
+        from enrivo.service import ScanFlags
+        from enrivo.webapp import run_scan
 
         self.assertEqual(ScanFlags().permute_max, 19)
         self.assertEqual(

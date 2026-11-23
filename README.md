@@ -1,5 +1,5 @@
 ---
-title: Contact Lookup
+title: Enrivo
 emoji: 😻
 colorFrom: blue
 colorTo: indigo
@@ -14,12 +14,12 @@ short_description: contact enrichment tool
 Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
 
 
-# ehunter
+# Enrivo
 
 Give it a domain (or a list of names) and get back a table of people: **name, title, email, how confident we are, and which source produced it.**
 
 ```
-$ python -m ehunter scan fsf.org --permute --linkedin
+$ python -m enrivo scan fsf.org --permute --linkedin
 
   domain      : fsf.org
   people      : 237  (236 with email, 11 SMTP-verified)
@@ -95,17 +95,17 @@ Rows are labelled with both, so downstream code never has to guess.
 Pure standard library, Python 3.9+. No dependencies.
 
 ```bash
-cd employee-hunter
-python -m pip install -e .     # gives you the `ehunter` command
+cd contact-lookup
+python -m pip install -e .     # gives you the `enrivo` command
 # or, without installing:
-python -m ehunter scan acme.com
+python -m enrivo scan acme.com
 ```
 
 Configure keys (all optional):
 
 ```bash
 cp .env.example .env    # then edit
-ehunter sources         # shows what is active and what is missing
+enrivo sources         # shows what is active and what is missing
 ```
 
 ---
@@ -116,43 +116,43 @@ ehunter sources         # shows what is active and what is missing
 
 ```bash
 # free sources only (website + PGP keyservers), no keys needed
-ehunter scan acme.com
+enrivo scan acme.com
 
 # everything configured, plus mailbox verification
-ehunter scan acme.com --verify --from-addr you@yourdomain.com
+enrivo scan acme.com --verify --from-addr you@yourdomain.com
 
 # tight scope and a deeper crawl
-ehunter scan acme.com --sources web,github --github-org acme-inc --max-pages 25
+enrivo scan acme.com --sources web,github --github-org acme-inc --max-pages 25
 
 # ONE command: discover + verify + fall back through the permutation ladder
-ehunter scan acme.com --permute
+enrivo scan acme.com --permute
 
 # expand a name list you already have into addresses, using the domain's pattern
-ehunter scan acme.com --names-file team.csv --patterns 2
+enrivo scan acme.com --names-file team.csv --patterns 2
 
 # machine-readable on stdout
-ehunter scan acme.com --json --quiet | jq '.employees | length'
+enrivo scan acme.com --json --quiet | jq '.employees | length'
 ```
 
 ### `linkedin` – every public profile that names the domain
 
 ```bash
-ehunter linkedin acme.com --depth 3                 # 14 query variants, 3 pages each
-ehunter linkedin acme.com --current-only            # employees only
-ehunter linkedin acme.com --json --quiet            # machine-readable
+enrivo linkedin acme.com --depth 3                 # 14 query variants, 3 pages each
+enrivo linkedin acme.com --current-only            # employees only
+enrivo linkedin acme.com --json --quiet            # machine-readable
 ```
 
 ### `verify` – SMTP check without discovery
 
 ```bash
-ehunter verify alice@acme.com bob@acme.com
-ehunter verify emails.txt --json-out verified.json --threads 4
+enrivo verify alice@acme.com bob@acme.com
+enrivo verify emails.txt --json-out verified.json --threads 4
 ```
 
 ### `patterns` – what convention does this domain use?
 
 ```bash
-ehunter patterns known_emails.csv      # our CSV export, Hunter export, or "Name <email>" lines
+enrivo patterns known_emails.csv      # our CSV export, Hunter export, or "Name <email>" lines
 ```
 
 ```
@@ -164,14 +164,14 @@ pattern         matched  confidence  example
 ### `sources` – what is configured
 
 ```bash
-ehunter sources
+enrivo sources
 ```
 
 ---
 
 ## Sources
 
-Everything is pluggable (`ehunter/sources/`). Order shown is report order.
+Everything is pluggable (`enrivo/sources/`). Order shown is report order.
 
 | Source | Key(s) | Cost | What it gives you | Notes |
 |---|---|---|---|---|
@@ -205,7 +205,7 @@ one with the most heuristics:
 
 ---
 
-## The pattern engine (`ehunter/patterns.py`)
+## The pattern engine (`enrivo/patterns.py`)
 
 Given observed `(first, last, email)` triples it scores 16 conventions and picks the one
 that explains the most of them:
@@ -239,7 +239,7 @@ discovered address was rejected or never existed, and stops at the first address
 mail server accepts. Preview the ladder without touching the network:
 
 ```bash
-ehunter permute "Jane Doe" --domain acme.com
+enrivo permute "Jane Doe" --domain acme.com
 ```
 
 ```
@@ -301,7 +301,7 @@ and runs the **whole ladder for the best spelling before moving to the next**:
 | `first-only` | cher | a single clean token: only `cher@domain` can be built |
 
 ```bash
-$ ehunter permute "Jane99 Doe" --domain bamboobox.ai
+$ enrivo permute "Jane99 Doe" --domain bamboobox.ai
 1  first.last (clean)  jane.doe@bamboobox.ai
 2  first (clean)       jane@bamboobox.ai
 ...
@@ -311,7 +311,7 @@ $ ehunter permute "Jane99 Doe" --domain bamboobox.ai
 A dirty single token (`s3raj`) is skipped on purpose: the cleaned guess would be a
 different word, not the person's name.
 
-## SMTP verification (`ehunter/smtp.py`)
+## SMTP verification (`enrivo/smtp.py`)
 
 Needs **outbound port 25**; many office/ISP networks block it (the tool says so inline).
 
@@ -348,7 +348,7 @@ Set `VERIFY_FROM` to an address on a domain that actually authorises it.
 The naive verifier (open SMTP, `RCPT TO`, `return code == 250`) produces wrong answers in
 three situations this tool handles explicitly:
 
-| Situation | Naive result | What ehunter does |
+| Situation | Naive result | What enrivo does |
 |---|---|---|
 | **Catch-all domain** — the server accepts every address | "valid" for a made-up address | probes a random address first; if it is accepted, the domain is `catch_all` and no acceptance means anything |
 | **Receiver rejects the *sender*** — SPF/DKIM/reputation, e.g. `550 Sender verification failed` | "invalid" for a real employee | classifies it as `unknown` (policy) instead of `invalid` |
@@ -367,7 +367,7 @@ Workspace domain every further `RCPT` returns
 `450 4.2.1 The user you are trying to contact is receiving mail at a rate`, which is a
 `greylisted` verdict, not a rejection. Keep `--permute-max` modest and `--verify-delay`
 around 1s on Google-hosted domains, or re-check those addresses later with
-`ehunter verify`.
+`enrivo verify`.
 
 **Port 25 blocked by your ISP/hotspot?** Test it: `python -c "import socket; socket.create_connection(('aspmx.l.google.com', 25), 5)"`. If that times out, route
 the probes through a host that allows port 25 (check it there with
@@ -453,7 +453,7 @@ Exit codes: `0` success, `2` bad input/domain, `1` unexpected error, `130` inter
 ## Adding a source
 
 ```python
-# ehunter/sources/mysource.py
+# enrivo/sources/mysource.py
 from .base import Source, rec
 
 class MySource(Source):
@@ -474,7 +474,7 @@ class MySource(Source):
         ]
 ```
 
-Register it in `ehunter/sources/__init__.py` (one line in `ALL`). Errors are contained:
+Register it in `enrivo/sources/__init__.py` (one line in `ALL`). Errors are contained:
 a source that raises produces a `source: failed` note, the scan continues.
 
 ---
@@ -589,7 +589,7 @@ current table. A row's key is its person, not its address, so an email appearing
 updates that person's row instead of adding a duplicate:
 
 ```python
-from ehunter.progress import row_key
+from enrivo.progress import row_key
 
 table = {}
 for event in stream:
@@ -661,7 +661,7 @@ front matter declares `sdk: docker` / `app_port: 7860`.
 
 ```bash
 git clone https://huggingface.co/spaces/<user>/<space>
-cp -r ./* .                      # Dockerfile, server.py, ehunter/, requirements-api.txt, README.md
+cp -r ./* .                      # Dockerfile, server.py, enrivo/, requirements-api.txt, README.md
 git add -A && git commit -m "api space" && git push
 ```
 

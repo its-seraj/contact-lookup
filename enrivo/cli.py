@@ -1,9 +1,9 @@
 """Command line interface.
 
-    ehunter scan example.com --verify
-    ehunter verify alice@example.com bob@example.com --json-out v.json
-    ehunter patterns known.csv
-    ehunter sources
+    enrivo scan example.com --verify
+    enrivo verify alice@example.com bob@example.com --json-out v.json
+    enrivo patterns known.csv
+    enrivo sources
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from .util import EMAIL_RE, normalize_domain, now_stamp, parse_email_input
 
 _DOMAIN_ONLY = re.compile(r"^[a-z0-9][a-z0-9.\-]*\.[a-z]{2,}$", re.I)
 
-BANNER = "ehunter {ver}  |  domain -> employees (names, titles, emails)"
+BANNER = "enrivo {ver}  |  domain -> employees (names, titles, emails)"
 
 
 # ---------------------------------------------------------------- helpers
@@ -172,21 +172,21 @@ def _table(rows, headers) -> str:
 # ---------------------------------------------------------------- parser
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ehunter",
+        prog="enrivo",
         description="Map a company domain to employee names, titles and email addresses.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
-            "  ehunter scan acme.com\n"
-            "  ehunter scan acme.com --verify --min-confidence 40\n"
-            "  ehunter scan acme.com --sources web,pgp,github --github-org acme-inc\n"
-            "  ehunter scan acme.com --names-file team.csv --patterns 2\n"
-            "  ehunter verify alice@acme.com bob@acme.com\n"
-            "  ehunter patterns known_emails.csv\n"
-            "  ehunter sources\n"
+            "  enrivo scan acme.com\n"
+            "  enrivo scan acme.com --verify --min-confidence 40\n"
+            "  enrivo scan acme.com --sources web,pgp,github --github-org acme-inc\n"
+            "  enrivo scan acme.com --names-file team.csv --patterns 2\n"
+            "  enrivo verify alice@acme.com bob@acme.com\n"
+            "  enrivo patterns known_emails.csv\n"
+            "  enrivo sources\n"
         ),
     )
-    parser.add_argument("--version", action="version", version=f"ehunter {__version__}")
+    parser.add_argument("--version", action="version", version=f"enrivo {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     scan = sub.add_parser("scan", help="run discovery for a domain")
@@ -392,7 +392,7 @@ def _cmd_scan(args) -> int:
             print("", file=sys.stderr)
             print("  no people found. Most likely causes: every keyed source is unconfigured, "
                   "the site blocks scraping (403), or the domain has no public footprint. "
-                  "Run `ehunter sources` to see what is active.", file=sys.stderr)
+                  "Run `enrivo sources` to see what is active.", file=sys.stderr)
     return 0
 
 

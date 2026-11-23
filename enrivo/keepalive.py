@@ -32,7 +32,7 @@ from typing import Callable, Iterable, List, Optional
 
 from .config import env
 
-log = logging.getLogger("ehunter.keepalive")
+log = logging.getLogger("enrivo.keepalive")
 
 FIRST_PING_DELAY_S = 30          # let our own server start listening before pinging it
 DEFAULT_INTERVAL_MIN = 30
@@ -41,7 +41,7 @@ DEFAULT_INTERVAL_MIN = 30
 def ping(url: str, timeout: float = 20.0) -> bool:
     """True when `url` answers 200 with JSON (i.e. the app itself, not a sleep page)."""
     request = urllib.request.Request(url, headers={"Accept": "application/json",
-                                                   "User-Agent": "ehunter-keepalive"})
+                                                   "User-Agent": "enrivo-keepalive"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             if response.status != 200:

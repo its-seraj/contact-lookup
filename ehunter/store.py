@@ -4,7 +4,7 @@ The cache is optional: if pymongo is not installed, or the server is unreachable
 method degrades to "no cached data" instead of failing the request.
 
     MONGODB_URI=mongodb://localhost:27017
-    MONGODB_DB=ehunter          # database name
+    MONGODB_DB=enrivo          # database name
     MONGODB_COLLECTION=domains  # collection name
 """
 
@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 from .config import env
 
-log = logging.getLogger("ehunter.store")
+log = logging.getLogger("enrivo.store")
 
 # Accept the names people actually use, so an existing URL does not have to be renamed.
 MONGO_ENV_NAMES = ("MONGODB_URI", "MONGO_URI", "MONGODB_URL", "MONGO_URL", "DATABASE_URL")
@@ -45,7 +45,7 @@ class DomainStore:
             self.uri = found
         else:
             self.uri, self.uri_from = uri, "argument"
-        self.db_name = db_name or env("MONGODB_DB") or "ehunter"
+        self.db_name = db_name or env("MONGODB_DB") or "enrivo"
         self.collection_name = collection or env("MONGODB_COLLECTION") or "domains"
         self._client = None
         self._col = None

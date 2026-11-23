@@ -321,7 +321,7 @@ async def health():
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="ehunter API",
+        title="Enrivo API",
         version=__version__,
         description="Domain -> people, work emails and LinkedIn profiles, streamed per domain.",
     )

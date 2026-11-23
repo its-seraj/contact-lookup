@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ehunter"
+name = "enrivo"
 version = "1.0.0"
 description = "Domain -> employee names, titles and email addresses (OSINT aggregation + email pattern inference)"
 readme = "README.md"
@@ -16,7 +16,7 @@ dns = ["dnspython>=2.4"]
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "pymongo>=4.6"]
 
 [project.scripts]
-ehunter = "ehunter.cli:main"
+enrivo = "enrivo.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["ehunter*"]
+include = ["enrivo*"]
